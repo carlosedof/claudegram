@@ -1,0 +1,21 @@
+services:
+  claudegram:
+    build: .
+    container_name: claudegram
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Agent works inside the mounted workspace, never the container root
+      WORKSPACE_DIR: /workspace
+      BOT_MODE: prod
+    volumes:
+      # Projects the agent can see/edit (bind mount on the host)
+      - ./workspace:/workspace
+      # Bot state: session history, user preferences, per-chat settings
+      - claudegram-state:/root/.claudegram
+      # Claude Code state: sessions, credentials (if using OAuth login)
+      - claude-state:/root/.claude
+
+volumes:
+  claudegram-state:
+  claude-state:
