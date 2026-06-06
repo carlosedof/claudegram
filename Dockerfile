@@ -17,7 +17,7 @@ FROM node:22-slim
 # ffmpeg: TTS audio concat + reddit video muxing
 # yt-dlp: /extract and /vreddit media downloads
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl ca-certificates git openssh-client ffmpeg awscli \
+      curl ca-certificates git openssh-client ffmpeg awscli procps iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp \
