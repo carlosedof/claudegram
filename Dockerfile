@@ -12,11 +12,12 @@ RUN npm run build && npm prune --omit=dev
 # ── Runtime stage ────────────────────────────────────────────
 FROM node:22-slim
 # curl: file downloads (utils/download.ts)
-# git: Claude Code agent operations inside the workspace
+# git + openssh-client: Claude Code agent operations inside the workspace,
+#   including SSH remotes (mount host ~/.ssh and ~/.gitconfig to reuse auth)
 # ffmpeg: TTS audio concat + reddit video muxing
 # yt-dlp: /extract and /vreddit media downloads
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl ca-certificates git ffmpeg \
+      curl ca-certificates git openssh-client ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp \
