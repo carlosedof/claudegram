@@ -17,11 +17,13 @@ FROM node:22-slim
 # ffmpeg: TTS audio concat + reddit video muxing
 # yt-dlp: /extract and /vreddit media downloads
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl ca-certificates git openssh-client ffmpeg \
+      curl ca-certificates git openssh-client ffmpeg awscli \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp \
-    && chmod +x /usr/local/bin/yt-dlp
+    && chmod +x /usr/local/bin/yt-dlp \
+    && curl -fsSL https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_linux_amd64.tar.gz \
+       | tar xz --strip-components=2 -C /usr/local/bin gh_2.93.0_linux_amd64/bin/gh
 
 WORKDIR /app
 ENV NODE_ENV=production
