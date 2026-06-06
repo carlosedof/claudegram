@@ -25,6 +25,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_linux_amd64.tar.gz \
        | tar xz --strip-components=2 -C /usr/local/bin gh_2.93.0_linux_amd64/bin/gh
 
+# Legacy MongoDB 4.4 shell for DocumentDB queries via SSH tunnel.
+# DocDB advertises wire version 7 (MongoDB 4.0) — the modern mongosh refuses
+# it, so the legacy `mongo` shell is required. The ubuntu2004 build needs
+# libssl1.1, which Debian bookworm dropped; pull it from Ubuntu focal.
+RUN curl -fsSL http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb \
+       -o /tmp/libssl1.1.deb \
+    && dpkg -i /tmp/libssl1.1.deb && rm /tmp/libssl1.1.deb \
+    && curl -fsSL https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-ubuntu2004-4.4.29.tgz \
+       -o /tmp/m.tgz \
+    && tar xzf /tmp/m.tgz -C /tmp \
+    && cp /tmp/mongodb-linux-x86_64-ubuntu2004-4.4.29/bin/mongo /usr/local/bin/mongo \
+    && rm -rf /tmp/m.tgz /tmp/mongodb-linux-x86_64-ubuntu2004-4.4.29
+
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules
