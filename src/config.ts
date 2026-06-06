@@ -109,7 +109,14 @@ const envSchema = z.object({
     .default('50')
     .transform((val) => parseInt(val, 10)),
   // Telegraph (Instant View for long messages)
-  TELEGRAPH_ENABLED: z.string().default('true').transform(toBool),
+  // Default OFF: Telegraph pages are public and permanent (no delete API).
+  TELEGRAPH_ENABLED: z.string().default('false').transform(toBool),
+  // Long responses: send as .md document attachment instead of chunked
+  // messages (private alternative to Telegraph). 0 = disabled (chunking only).
+  FILE_RESPONSE_THRESHOLD: z
+    .string()
+    .default('3000')
+    .transform((val) => parseInt(val, 10)),
   // Medium / Freedium configuration
   MEDIUM_ENABLED: z.string().default('true').transform(toBool),
   MEDIUM_TIMEOUT_MS: z

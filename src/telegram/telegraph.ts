@@ -460,6 +460,14 @@ export async function createTelegraphPage(
   title: string,
   markdown: string
 ): Promise<string | null> {
+  // Hard gate: never publish to Telegraph when disabled, regardless of caller.
+  // Telegraph pages are public and permanent (no delete API), so this must
+  // not be bypassable via direct calls (e.g. /medium, sendMarkdownFile).
+  if (!config.TELEGRAPH_ENABLED) {
+    console.warn('[Telegraph] Disabled by config — refusing to publish');
+    return null;
+  }
+
   if (!telegraphAccount) {
     await initTelegraph();
   }

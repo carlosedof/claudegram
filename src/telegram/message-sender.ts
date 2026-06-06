@@ -68,6 +68,13 @@ export class MessageSender {
       }
     }
 
+    // Long content: send as .md document to keep it in the chat (private
+    // alternative to Telegraph)
+    if (this.shouldSendAsFile(text)) {
+      const sent = await this.sendAsMarkdownDocument(ctx, text);
+      if (sent) return;
+    }
+
     // Default: MarkdownV2 with chunking
     const parts = processMessageForTelegram(text, config.MAX_MESSAGE_LENGTH);
 
@@ -84,6 +91,34 @@ export class MessageSender {
         // Already sent full text as plain — skip remaining MarkdownV2 parts
         return;
       }
+    }
+  }
+
+  /**
+   * Whether long content should be sent as a .md document instead of
+   * chunked messages (private alternative to Telegraph).
+   */
+  private shouldSendAsFile(text: string): boolean {
+    return config.FILE_RESPONSE_THRESHOLD > 0 && text.length > config.FILE_RESPONSE_THRESHOLD;
+  }
+
+  /**
+   * Send content as a .md document attachment with a short caption preview.
+   * Keeps long responses inside the chat instead of publishing externally.
+   */
+  private async sendAsMarkdownDocument(ctx: Context, text: string): Promise<boolean> {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const inputFile = new InputFile(Buffer.from(text, 'utf-8'), `claude-response-${timestamp}.md`);
+      const preview = text.substring(0, 200).replace(/[#*_`\[\]]/g, '') + '...';
+      await ctx.replyWithDocument(inputFile, {
+        caption: `📄 ${escapeMarkdownV2(preview)}`,
+        parse_mode: 'MarkdownV2',
+      });
+      return true;
+    } catch (error) {
+      console.error('[FileResponse] Failed to send document, falling back to chunks:', error);
+      return false;
     }
   }
 
@@ -408,6 +443,19 @@ export class MessageSender {
             } catch (error) {
               console.error('[Telegraph] Failed, falling back to chunks:', error);
             }
+          }
+        }
+
+        // Long content: send as .md document and remove the streaming
+        // placeholder (private alternative to Telegraph)
+        if (this.shouldSendAsFile(finalContent)) {
+          const sent = await this.sendAsMarkdownDocument(ctx, finalContent);
+          if (sent) {
+            try {
+              await ctx.api.deleteMessage(chatId, state.messageId);
+            } catch { /* ignore */ }
+            this.streamStates.delete(sessionKey);
+            return;
           }
         }
 
