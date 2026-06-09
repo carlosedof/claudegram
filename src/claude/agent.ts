@@ -299,10 +299,12 @@ export async function sendToAgent(
 ): Promise<AgentResponse> {
   const { onProgress, onToolStart, onToolEnd, abortController, command, model, images } = options;
 
-  const session = sessionManager.getSession(sessionKey);
+  let session = sessionManager.getSession(sessionKey);
 
   if (!session) {
-    throw new Error('No active session. Use /project to set working directory.');
+    // Default new sessions to the workspace root (all repos visible) instead of
+    // forcing /project first — fits the multi-repo workflow.
+    session = sessionManager.createSession(sessionKey, config.WORKSPACE_DIR);
   }
 
   sessionManager.updateActivity(sessionKey, message);
@@ -704,10 +706,11 @@ export async function sendLoopToAgent(
     onIterationComplete,
   } = options;
 
-  const session = sessionManager.getSession(sessionKey);
+  let session = sessionManager.getSession(sessionKey);
 
   if (!session) {
-    throw new Error('No active session. Use /project to set working directory.');
+    // Default new sessions to the workspace root (all repos visible).
+    session = sessionManager.createSession(sessionKey, config.WORKSPACE_DIR);
   }
 
   // Wrap the prompt with loop instructions
