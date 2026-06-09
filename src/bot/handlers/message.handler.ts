@@ -260,14 +260,7 @@ export async function handleMessage(ctx: Context): Promise<void> {
   }
 
   // Check for active session
-  const session = sessionManager.getSession(sessionKey);
-  if (!session) {
-    await ctx.reply(
-      '⚠️ No project set\\.\n\nIf the bot restarted, use `/continue` or `/resume` to restore your last session\\.\nOr use `/project` to open a project first\\.',
-      { parse_mode: 'MarkdownV2' }
-    );
-    return;
-  }
+  const session = sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
 
   // If CANCEL_ON_NEW_MESSAGE is enabled, auto-cancel the running query;
   // otherwise queue the new message behind it and show the queue position.
@@ -359,14 +352,7 @@ async function handleProjectReply(ctx: Context, sessionKey: string, projectPath:
 async function handleFileReply(ctx: Context, sessionKey: string, filePath: string): Promise<void> {
   const trimmedPath = filePath.trim();
 
-  const session = sessionManager.getSession(sessionKey);
-  if (!session) {
-    await ctx.reply(
-      '⚠️ No project set\\.\n\nIf the bot restarted, use `/continue` or `/resume` to restore your last session\\.\nOr use `/project` to open a project first\\.',
-      { parse_mode: 'MarkdownV2' }
-    );
-    return;
-  }
+  const session = sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
 
   const fullPath = trimmedPath.startsWith('/')
     ? trimmedPath
@@ -414,14 +400,7 @@ async function handleAgentReply(
   input: string,
   mode: 'plan' | 'explore' | 'loop'
 ): Promise<void> {
-  const session = sessionManager.getSession(sessionKey);
-  if (!session) {
-    await ctx.reply(
-      '⚠️ No project set\\.\n\nIf the bot restarted, use `/continue` or `/resume` to restore your last session\\.\nOr use `/project` to open a project first\\.',
-      { parse_mode: 'MarkdownV2' }
-    );
-    return;
-  }
+  const session = sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
 
   const trimmedInput = input.trim();
   if (!trimmedInput) {
@@ -493,14 +472,7 @@ async function handleAgentReply(
 async function handleTelegraphReply(ctx: Context, sessionKey: string, filePath: string): Promise<void> {
   const trimmedPath = filePath.trim();
 
-  const session = sessionManager.getSession(sessionKey);
-  if (!session) {
-    await ctx.reply(
-      '⚠️ No project set\\.\n\nIf the bot restarted, use `/continue` or `/resume` to restore your last session\\.\nOr use `/project` to open a project first\\.',
-      { parse_mode: 'MarkdownV2' }
-    );
-    return;
-  }
+  const session = sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
 
   const fullPath = trimmedPath.startsWith('/')
     ? trimmedPath

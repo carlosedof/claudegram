@@ -53,15 +53,8 @@ export async function handleVoice(ctx: Context): Promise<void> {
     }
   }
 
-  // Check session
-  const session = sessionManager.getSession(sessionKey);
-  if (!session) {
-    await ctx.reply(
-      '⚠️ No project set\\.\n\nIf the bot restarted, use `/continue` or `/resume` to restore your last session\\.\nOr use `/project` to open a project first\\.',
-      { parse_mode: 'MarkdownV2' }
-    );
-    return;
-  }
+  // Default to the workspace root if no session yet (multi-repo workflow)
+  const session = sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
 
   // Check file size
   const fileSizeBytes = voice.file_size || 0;

@@ -43,6 +43,15 @@ class SessionManager {
     return this.sessions.get(sessionKey);
   }
 
+  /**
+   * Return the existing session, or create one rooted at defaultDir.
+   * Lets handlers default new chats/topics to the workspace root instead of
+   * forcing /project first.
+   */
+  getOrCreate(sessionKey: string, defaultDir: string): Session {
+    return this.sessions.get(sessionKey) ?? this.createSession(sessionKey, defaultDir);
+  }
+
   createSession(sessionKey: string, workingDirectory: string, conversationId?: string): Session {
     const resolved = resolveWorkingDirectory(workingDirectory);
     const session: Session = {

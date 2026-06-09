@@ -159,14 +159,7 @@ export async function handlePhoto(ctx: Context): Promise<void> {
   }
   markProcessed(messageId);
 
-  const session = sessionManager.getSession(sessionKey);
-  if (!session) {
-    await ctx.reply(
-      '⚠️ No project set\\.\n\nIf the bot restarted, use `/continue` or `/resume` to restore your last session\\.\nOr use `/project` to open a project first\\.',
-      { parse_mode: 'MarkdownV2' }
-    );
-    return;
-  }
+  const session = sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
 
   const largest = pickLargestPhoto(photos);
   const fileSizeBytes = largest.file_size || 0;
@@ -251,14 +244,7 @@ export async function handleImageDocument(ctx: Context): Promise<void> {
   }
   markProcessed(messageId);
 
-  const session = sessionManager.getSession(sessionKey);
-  if (!session) {
-    await ctx.reply(
-      '⚠️ No project set\\.\n\nIf the bot restarted, use `/continue` or `/resume` to restore your last session\\.\nOr use `/project` to open a project first\\.',
-      { parse_mode: 'MarkdownV2' }
-    );
-    return;
-  }
+  const session = sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
 
   const fileSizeBytes = document.file_size || 0;
   const fileSizeMB = fileSizeBytes / (1024 * 1024);
