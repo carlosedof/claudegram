@@ -103,14 +103,45 @@ export class MessageSender {
   }
 
   /**
-   * Send content as a .md document attachment with a short caption preview.
+   * Strip markdown formatting so the file contains plain readable text.
+   */
+  private stripMarkdown(text: string): string {
+    return text
+      // Remove code blocks (``` ... ```) but keep their content
+      .replace(/```[\s\S]*?```/g, (match) => match.replace(/```\w*\n?/g, '').replace(/```/g, ''))
+      // Remove inline code backticks
+      .replace(/`([^`]+)`/g, '$1')
+      // Remove headings markers (# ## ### etc.)
+      .replace(/^#{1,6}\s+/gm, '')
+      // Remove bold/italic markers
+      .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
+      .replace(/_{1,3}([^_]+)_{1,3}/g, '$1')
+      // Remove strikethrough
+      .replace(/~~([^~]+)~~/g, '$1')
+      // Remove link syntax [text](url) → text (url)
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+      // Remove image syntax ![alt](url) → alt
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+      // Remove blockquote markers
+      .replace(/^>\s?/gm, '')
+      // Remove horizontal rules
+      .replace(/^[-*_]{3,}\s*$/gm, '')
+      // Collapse multiple blank lines into one
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /**
+   * Send content as a .txt document attachment with a short caption preview.
+   * Strips markdown formatting so the file is plain readable text.
    * Keeps long responses inside the chat instead of publishing externally.
    */
   private async sendAsMarkdownDocument(ctx: Context, text: string): Promise<boolean> {
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const inputFile = new InputFile(Buffer.from(text, 'utf-8'), `claude-response-${timestamp}.md`);
-      const preview = text.substring(0, 200).replace(/[#*_`\[\]]/g, '') + '...';
+      const plainText = this.stripMarkdown(text);
+      const inputFile = new InputFile(Buffer.from(plainText, 'utf-8'), `claude-response-${timestamp}.txt`);
+      const preview = plainText.substring(0, 200) + '...';
       await ctx.replyWithDocument(inputFile, {
         caption: `📄 ${escapeMarkdownV2(preview)}`,
         parse_mode: 'MarkdownV2',
