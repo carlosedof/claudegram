@@ -44,6 +44,30 @@ class SessionManager {
   }
 
   /**
+   * Warm the in-memory session map from persisted history at startup.
+   * Without this, a restart wipes all live sessions and the next message in a
+   * chat/topic starts a fresh Claude session with no context. Rehydrating the
+   * last session per key (incl. claudeSessionId + cwd) lets the agent resume
+   * transparently after restarts/redeploys. Does not re-persist (read-only load).
+   */
+  hydrateFromHistory(): number {
+    const active = sessionHistory.getAllActiveSessions();
+    let count = 0;
+    for (const [sessionKey, entry] of active) {
+      if (this.sessions.has(sessionKey)) continue;
+      this.sessions.set(sessionKey, {
+        conversationId: entry.conversationId,
+        claudeSessionId: entry.claudeSessionId,
+        workingDirectory: resolveWorkingDirectory(entry.projectPath),
+        createdAt: new Date(entry.createdAt),
+        lastActivity: new Date(entry.lastActivity),
+      });
+      count++;
+    }
+    return count;
+  }
+
+  /**
    * Return the existing session, or create one rooted at defaultDir.
    * Lets handlers default new chats/topics to the workspace root instead of
    * forcing /project first.

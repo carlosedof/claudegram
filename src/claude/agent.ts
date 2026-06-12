@@ -47,6 +47,13 @@ const chatSessionIds = new BoundedMap<string, string>(1000);
 // chatModels is intentionally unbounded — it's backed by persistent preferences
 const chatModels = new Map<string, string>();
 
+// Pin model aliases to explicit ids. The bundled Claude Code CLI maps the bare
+// "opus" alias to an older Opus; force Opus 4.8 here. sonnet/haiku stay as
+// aliases so they keep tracking the latest of their tier.
+const MODEL_ALIASES: Record<string, string> = {
+  opus: 'claude-opus-4-8',
+};
+
 // Cache latest usage per session for /context and /status commands
 const chatUsageCache = new BoundedMap<string, AgentUsage>(1000);
 
@@ -349,8 +356,10 @@ export async function sendToAgent(
   // Log in dangerous mode for security auditing
   logDangerousModeOperation(sessionKey, 'query', `prompt_length:${message.length} cwd:${session.workingDirectory}`);
 
-  // Determine model to use (default to 'opus' to match getModel() default)
-  const effectiveModel = model || chatModels.get(sessionKey) || 'opus';
+  // Determine model to use (default to 'opus' to match getModel() default).
+  // Resolve aliases (opus -> Opus 4.8) since the bundled CLI alias is stale.
+  const requestedModel = model || chatModels.get(sessionKey) || 'opus';
+  const effectiveModel = MODEL_ALIASES[requestedModel] ?? requestedModel;
 
   // Initialize timer for tracking query duration (watchdog created inside try with controller)
   const timer = createAgentTimer();

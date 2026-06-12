@@ -3,6 +3,7 @@ import { createBot } from './bot/bot.js';
 import { config } from './config.js';
 import { preventSleep, allowSleep } from './utils/caffeinate.js';
 import { stopCleanup } from './telegram/deduplication.js';
+import { sessionManager } from './claude/session-manager.js';
 
 async function main() {
   console.log('🤖 Starting Claudegram...');
@@ -11,6 +12,12 @@ async function main() {
 
   // Prevent system sleep on macOS
   preventSleep();
+
+  // Restore live sessions persisted before the last restart, so the first
+  // message in each chat/topic resumes its Claude session instead of starting
+  // cold (fixes context loss after restart/redeploy).
+  const restored = sessionManager.hydrateFromHistory();
+  console.log(`♻️  Restored ${restored} session(s) from history`);
 
   const bot = await createBot();
 
