@@ -77,6 +77,14 @@ const envSchema = z.object({
     .string()
     .default('5')
     .transform((val) => parseInt(val, 10)),
+  // Proactive context compaction: when a session's context usage reaches this
+  // fraction of the model's context window, run /compact before the next turn
+  // so each turn ships a smaller context (faster + cheaper). 0 disables (then
+  // only the model's own near-limit auto-compaction applies). Range 0..1.
+  AUTO_COMPACT_THRESHOLD: z
+    .string()
+    .default('0.7')
+    .transform((val) => parseFloat(val)),
   REDDITFETCH_JSON_THRESHOLD_CHARS: z
     .string()
     .default('8000')

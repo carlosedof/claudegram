@@ -311,6 +311,56 @@ function logDangerousModeOperation(sessionKey: string, operation: string, detail
   console.log(`[DANGEROUS_MODE] ${timestamp} session:${sessionKey} ${operation}${detailStr}`);
 }
 
+/**
+ * Proactively compact a session's context by running the CLI `/compact` command.
+ * Keeps the same session id but replaces the live context with a summary, so the
+ * next real turn ships a much smaller context (faster + cheaper). Best-effort:
+ * any failure is logged and the caller proceeds with the un-compacted session.
+ */
+async function compactSession(
+  sessionKey: string,
+  cwd: string,
+  model: string,
+  resumeSessionId: string,
+): Promise<boolean> {
+  try {
+    const compactQuery = query({
+      prompt: '/compact',
+      options: {
+        cwd,
+        model,
+        permissionMode: 'acceptEdits' as PermissionMode,
+        settingSources: ['project', 'user'] as SettingSource[],
+        resume: resumeSessionId,
+        ...(config.CLAUDE_USE_BUNDLED_EXECUTABLE ? {} : { pathToClaudeCodeExecutable: config.CLAUDE_EXECUTABLE_PATH }),
+        stderr: () => {},
+      },
+    });
+    let compacted = false;
+    for await (const m of compactQuery) {
+      if (m.type === 'system' && m.subtype === 'compact_boundary') {
+        compacted = true;
+      } else if (m.type === 'result') {
+        const rm = m as SDKResultMessage;
+        if ('session_id' in rm && rm.session_id) {
+          chatSessionIds.set(sessionKey, rm.session_id);
+          sessionManager.setClaudeSessionId(sessionKey, rm.session_id);
+        }
+      }
+    }
+    if (compacted) {
+      // Drop the stale (large) usage so the threshold check doesn't immediately
+      // re-fire; the next real turn rebuilds usage from the now-small context.
+      chatUsageCache.delete(sessionKey);
+      logAt('basic', `[Claude] AUTO-COMPACT done for session:${sessionKey}`);
+    }
+    return compacted;
+  } catch (err) {
+    logAt('basic', `[Claude] AUTO-COMPACT failed (continuing without): ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
 export async function sendToAgent(
   sessionKey: string,
   message: string,
@@ -368,7 +418,7 @@ export async function sendToAgent(
   try {
     const controller = abortController || new AbortController();
 
-    const existingSessionId = chatSessionIds.get(sessionKey) || session.claudeSessionId;
+    let existingSessionId = chatSessionIds.get(sessionKey) || session.claudeSessionId;
 
     // Log session resume if applicable
     if (existingSessionId) {
@@ -466,6 +516,29 @@ export async function sendToAgent(
       }
     } catch {
       cwd = process.env.HOME || process.cwd();
+    }
+
+    // Proactive context compaction: if the previous turn's context usage crossed
+    // the configured threshold, run /compact now so this turn ships a smaller
+    // context. Best-effort and non-fatal.
+    if (config.AUTO_COMPACT_THRESHOLD > 0 && existingSessionId) {
+      const lastUsage = chatUsageCache.get(sessionKey);
+      const ctxWindow = lastUsage?.contextWindow ?? 0;
+      if (ctxWindow > 0) {
+        const used =
+          (lastUsage!.inputTokens ?? 0) +
+          (lastUsage!.cacheReadTokens ?? 0) +
+          (lastUsage!.cacheWriteTokens ?? 0);
+        const ratio = used / ctxWindow;
+        if (ratio >= config.AUTO_COMPACT_THRESHOLD) {
+          logAt(
+            'basic',
+            `[Claude] AUTO-COMPACT: context ${(ratio * 100).toFixed(0)}% >= ${(config.AUTO_COMPACT_THRESHOLD * 100).toFixed(0)}% threshold, compacting session ${existingSessionId}`,
+          );
+          const ok = await compactSession(sessionKey, cwd, effectiveModel, existingSessionId);
+          if (ok) existingSessionId = chatSessionIds.get(sessionKey) || existingSessionId;
+        }
+      }
     }
 
     // Create MCP server for Claudegram tools (if telegramCtx is available)
