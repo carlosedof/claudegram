@@ -823,6 +823,38 @@ function listMarkdownFiles(projectPath: string, maxDepth: number = 3): string[] 
   });
 }
 
+/**
+ * /adopt <session-id> — bind a Claude session id (e.g. one pushed from the Mac
+ * via `clagram push`) to the current chat/topic, so the next message resumes it.
+ * Part of the Mac<->Telegram handoff (docs/superpowers/specs/2026-06-13-session-handoff-design.md).
+ */
+export async function handleAdopt(ctx: Context): Promise<void> {
+  const keyInfo = getSessionKeyFromCtx(ctx);
+  if (!keyInfo) {
+    await ctx.reply('Could not determine the session for this chat.');
+    return;
+  }
+  const sessionKey = keyInfo.sessionKey;
+  const id = (typeof ctx.match === 'string' ? ctx.match : '').trim();
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRe.test(id)) {
+    await ctx.reply('Usage: /adopt <session-id>  (the id is printed by `clagram push` on your Mac)');
+    return;
+  }
+  // The transcript must already be on the VM under the workspace project dir.
+  const projectDir = config.WORKSPACE_DIR.replace(/\//g, '-');
+  const transcript = path.join(os.homedir(), '.claude', 'projects', projectDir, `${id}.jsonl`);
+  if (!fs.existsSync(transcript)) {
+    await ctx.reply(`Session ${id} not found on the VM. Run \`clagram push\` first.`);
+    return;
+  }
+  // Drop stale in-memory agent state for this topic, then bind the adopted id.
+  clearConversation(sessionKey);
+  sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
+  sessionManager.setClaudeSessionId(sessionKey, id);
+  await ctx.reply(`✅ Adopted session ${id}. Send a message to continue where you left off on the Mac.`);
+}
+
 export async function handleStatus(ctx: Context): Promise<void> {
   const keyInfo = getSessionKeyFromCtx(ctx);
   if (!keyInfo) return;

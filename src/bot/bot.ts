@@ -35,6 +35,7 @@ import {
   handleResume,
   handleResumeCallback,
   handleContinue,
+  handleAdopt,
   handleLoop,
   handleSessions,
   handleTeleport,
@@ -180,6 +181,7 @@ export async function createBot(): Promise<Bot> {
   // Session resume commands
   bot.command('resume', handleResume);
   bot.command('continue', handleContinue);
+  bot.command('adopt', handleAdopt);
   bot.command('sessions', handleSessions);
 
   // Loop mode

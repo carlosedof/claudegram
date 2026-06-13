@@ -61,6 +61,7 @@ export function getAvailableCommands(): string {
         '• `/newproject <name>` \\- Create a new project',
         '• `/resume` \\- Pick from recent sessions to resume',
         '• `/continue` \\- Resume most recent session',
+        '• `/adopt <id>` \\- Adopt a session pushed from your Mac \\(clagram push\\)',
         '• `/sessions` \\- List all sessions',
         '• `/teleport` \\- Move session to terminal \\(forked\\)',
         '• `/clear` \\- Clear session and start fresh',
