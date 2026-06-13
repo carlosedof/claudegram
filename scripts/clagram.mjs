@@ -49,6 +49,10 @@ const CFG = {
 const remoteProjDir = () => `${CFG.remoteHome}/.claude/projects/${encodeProjectDir(CFG.remoteCwd)}`;
 const localProjDir = () => join(homedir(), '.claude', 'projects', encodeProjectDir(CFG.localWorkspace));
 
+// Command used to open a pulled session locally. Defaults to the `claudeb`
+// alias expansion (skip permission prompts). Override with CLAGRAM_CLAUDE_CMD.
+const CLAUDE_CMD = (process.env.CLAGRAM_CLAUDE_CMD || 'claude --dangerously-skip-permissions').split(/\s+/);
+
 function sh(file, args) {
   return execFileSync(file, args, { encoding: 'utf8' });
 }
@@ -81,14 +85,15 @@ async function cmdPull() {
     process.exit(1);
   }
   sh('scp', [`${CFG.host}:${remoteProjDir()}/${id}.jsonl`, dest]);
+  const launchLine = `${CLAUDE_CMD.join(' ')} --resume ${id}`;
   if (process.argv.includes('--print')) {
-    console.log(`\nPulled. Continue with:\n  cd ${CFG.localWorkspace} && claude --resume ${id}`);
+    console.log(`\nPulled. Continue with:\n  cd ${CFG.localWorkspace} && ${launchLine}`);
     return;
   }
   console.log(`\nPulled. Resuming ${id} in ${CFG.localWorkspace} ...\n`);
-  const r = spawnSync('claude', ['--resume', id], { cwd: CFG.localWorkspace, stdio: 'inherit' });
+  const r = spawnSync(CLAUDE_CMD[0], [...CLAUDE_CMD.slice(1), '--resume', id], { cwd: CFG.localWorkspace, stdio: 'inherit' });
   if (r.error) {
-    console.log(`Could not launch claude (${r.error.message}). Run manually:\n  cd ${CFG.localWorkspace} && claude --resume ${id}`);
+    console.log(`Could not launch ${CLAUDE_CMD[0]} (${r.error.message}). Run manually:\n  cd ${CFG.localWorkspace} && ${launchLine}`);
     process.exit(1);
   }
   process.exit(r.status ?? 0);
