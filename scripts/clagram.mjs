@@ -4,7 +4,7 @@
 // in clagram.test.mjs. The pull/push orchestration is verified manually.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, statSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -113,7 +113,8 @@ async function cmdPush() {
 
 // Only dispatch when run directly (not when imported by the test file), so
 // `node --test` importing this module has zero side effects.
-const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
+const invoked = process.argv[1] ? realpathSync(process.argv[1]) : '';
+const isMain = import.meta.url === pathToFileURL(invoked).href;
 if (isMain) {
   const cmd = process.argv[2];
   if (cmd === 'pull') cmdPull();
