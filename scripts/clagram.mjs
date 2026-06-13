@@ -3,7 +3,7 @@
 // Pure helpers (encodeProjectDir/parseSessions/compareForClobber) are unit-tested
 // in clagram.test.mjs. The pull/push orchestration is verified manually.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -81,7 +81,17 @@ async function cmdPull() {
     process.exit(1);
   }
   sh('scp', [`${CFG.host}:${remoteProjDir()}/${id}.jsonl`, dest]);
-  console.log(`\nPulled. Continue with:\n  cd ${CFG.localWorkspace} && claude --resume ${id}`);
+  if (process.argv.includes('--print')) {
+    console.log(`\nPulled. Continue with:\n  cd ${CFG.localWorkspace} && claude --resume ${id}`);
+    return;
+  }
+  console.log(`\nPulled. Resuming ${id} in ${CFG.localWorkspace} ...\n`);
+  const r = spawnSync('claude', ['--resume', id], { cwd: CFG.localWorkspace, stdio: 'inherit' });
+  if (r.error) {
+    console.log(`Could not launch claude (${r.error.message}). Run manually:\n  cd ${CFG.localWorkspace} && claude --resume ${id}`);
+    process.exit(1);
+  }
+  process.exit(r.status ?? 0);
 }
 
 async function cmdPush() {
