@@ -7,7 +7,7 @@ import { sessionManager } from './session-manager.js';
 import { clearConversation } from '../providers/provider-router.js';
 import { buildSessionKey } from '../utils/session-key.js';
 
-// Inbox lives in the bot's state volume; `clagram push` drops <id>.json here
+// Inbox lives in the bot's state volume; `claudegram push` drops <id>.json here
 // (via docker exec). We poll it and, for each request, create a fresh Telegram
 // forum topic, bind the pushed session to it, and post a ready message — so a
 // Mac->Telegram handoff needs no manual /adopt.

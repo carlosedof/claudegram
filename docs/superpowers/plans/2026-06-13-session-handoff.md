@@ -4,7 +4,7 @@
 
 **Goal:** Continue the same Claude conversation across the Mac (local `claude`) and Telegram/VM (`@olitermbot`), preserving context, via an explicit on-demand handoff.
 
-**Architecture:** One stable `session-id`; the transcript (`<id>.jsonl`) is copied between Mac and VM over SSH, placed in the destination's per-cwd project dir, and resumed with `claude --resume`. A Mac CLI (`clagram`) does pull/push; a `/adopt` bot command binds a pushed session to a Telegram topic. Repo folder names on the VM are unified to match the Mac so relative file paths resolve after handoff.
+**Architecture:** One stable `session-id`; the transcript (`<id>.jsonl`) is copied between Mac and VM over SSH, placed in the destination's per-cwd project dir, and resumed with `claude --resume`. A Mac CLI (`claudegram`) does pull/push; a `/adopt` bot command binds a pushed session to a Telegram topic. Repo folder names on the VM are unified to match the Mac so relative file paths resolve after handoff.
 
 **Tech Stack:** Node ESM (Mac CLI, no deps, `node --test` for pure helpers), TypeScript (bot command), SSH/scp, Docker (VM bot).
 
@@ -134,7 +134,7 @@ Append this function (all imports it needs — `sessionManager`, `clearConversat
 ```ts
 /**
  * /adopt <session-id> — bind a Claude session id (e.g. one pushed from the Mac
- * via `clagram push`) to the current chat/topic, so the next message resumes it.
+ * via `claudegram push`) to the current chat/topic, so the next message resumes it.
  * Part of the Mac<->Telegram handoff (docs/superpowers/specs/2026-06-13-session-handoff-design.md).
  */
 export async function handleAdopt(ctx: Context): Promise<void> {
@@ -147,14 +147,14 @@ export async function handleAdopt(ctx: Context): Promise<void> {
   const id = (typeof ctx.match === 'string' ? ctx.match : '').trim();
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!uuidRe.test(id)) {
-    await ctx.reply('Usage: /adopt <session-id>  (the id is printed by `clagram push` on your Mac)');
+    await ctx.reply('Usage: /adopt <session-id>  (the id is printed by `claudegram push` on your Mac)');
     return;
   }
   // The transcript must already be on the VM under the workspace project dir.
   const projectDir = config.WORKSPACE_DIR.replace(/\//g, '-');
   const transcript = path.join(os.homedir(), '.claude', 'projects', projectDir, `${id}.jsonl`);
   if (!fs.existsSync(transcript)) {
-    await ctx.reply(`Session ${id} not found on the VM. Run \`clagram push\` first.`);
+    await ctx.reply(`Session ${id} not found on the VM. Run \`claudegram push\` first.`);
     return;
   }
   // Drop stale in-memory agent state for this topic, then bind the adopted id.
@@ -178,7 +178,7 @@ In `src/bot/bot.ts`, add `handleAdopt` to the existing import from `./handlers/c
 In `src/claude/command-parser.ts`, find the array/list of command descriptions (the one consumed by `getAvailableCommands`) and add an entry mirroring the existing format, e.g.:
 
 ```ts
-  { command: '/adopt', description: 'Adopt a session id pushed from your Mac (clagram push)' },
+  { command: '/adopt', description: 'Adopt a session id pushed from your Mac (claudegram push)' },
 ```
 (Match the exact object shape used by the surrounding entries in that file.)
 
@@ -189,7 +189,7 @@ In `docs/index.html`, in the Session commands grid, add:
 ```html
 <div class="command-row">
   <code class="command-code">/adopt &lt;id&gt;</code>
-  <span class="command-desc">Adopt a session pushed from your Mac (clagram push) into this topic</span>
+  <span class="command-desc">Adopt a session pushed from your Mac (claudegram push) into this topic</span>
 </div>
 ```
 
@@ -216,22 +216,22 @@ In a topic: send `/adopt nonsense` → expect the Usage message. Send `/adopt 00
 
 ---
 
-### Task 3: `clagram` CLI — pure helpers + unit tests (TDD)
+### Task 3: `claudegram` CLI — pure helpers + unit tests (TDD)
 
 Create the CLI skeleton with the pure, testable helpers first. Lives in the repo so it is versioned; the Mac gets it in Task 5.
 
 **Files (in `/opt/claudegram`):**
-- Create: `scripts/clagram.mjs`
-- Create: `scripts/clagram.test.mjs`
+- Create: `scripts/claudegram.mjs`
+- Create: `scripts/claudegram.test.mjs`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `scripts/clagram.test.mjs`:
+Create `scripts/claudegram.test.mjs`:
 
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeProjectDir, parseSessions, compareForClobber } from './clagram.mjs';
+import { encodeProjectDir, parseSessions, compareForClobber } from './claudegram.mjs';
 
 test('encodeProjectDir replaces slashes with dashes', () => {
   assert.equal(encodeProjectDir('/workspace'), '-workspace');
@@ -270,17 +270,17 @@ test('compareForClobber flags a newer/larger destination', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `ssh contabo 'cd /opt/claudegram && node --test scripts/clagram.test.mjs'`
-Expected: FAIL — `Cannot find module './clagram.mjs'` or export errors.
+Run: `ssh contabo 'cd /opt/claudegram && node --test scripts/claudegram.test.mjs'`
+Expected: FAIL — `Cannot find module './claudegram.mjs'` or export errors.
 
-- [ ] **Step 3: Write the helpers in scripts/clagram.mjs**
+- [ ] **Step 3: Write the helpers in scripts/claudegram.mjs**
 
-Create `scripts/clagram.mjs` (helpers only for now; CLI wiring added in Task 4):
+Create `scripts/claudegram.mjs` (helpers only for now; CLI wiring added in Task 4):
 
 ```js
 #!/usr/bin/env node
-// clagram — handoff Claude sessions between this Mac and the Telegram/VM bot.
-// Pure helpers below are unit-tested in clagram.test.mjs.
+// claudegram — handoff Claude sessions between this Mac and the Telegram/VM bot.
+// Pure helpers below are unit-tested in claudegram.test.mjs.
 
 export function encodeProjectDir(cwd) {
   return cwd.replace(/\//g, '-');
@@ -314,28 +314,28 @@ export function compareForClobber(dest, src) {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `ssh contabo 'cd /opt/claudegram && node --test scripts/clagram.test.mjs'`
+Run: `ssh contabo 'cd /opt/claudegram && node --test scripts/claudegram.test.mjs'`
 Expected: PASS — 3 tests, 0 failures.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-ssh contabo 'cd /opt/claudegram && git add scripts/clagram.mjs scripts/clagram.test.mjs && \
-git -c user.name="Cadu Oliveira" -c user.email="cadu@maxpan.com.br" commit -m "feat(clagram): pure helpers for session handoff CLI + tests"'
+ssh contabo 'cd /opt/claudegram && git add scripts/claudegram.mjs scripts/claudegram.test.mjs && \
+git -c user.name="Cadu Oliveira" -c user.email="cadu@maxpan.com.br" commit -m "feat(claudegram): pure helpers for session handoff CLI + tests"'
 ```
 
 ---
 
-### Task 4: `clagram` CLI — pull/push orchestration
+### Task 4: `claudegram` CLI — pull/push orchestration
 
 Wire the SSH/scp commands and arg parsing around the helpers. This part touches the network and filesystem; it is verified manually in Task 5 (no automated test).
 
 **Files (in `/opt/claudegram`):**
-- Modify: `scripts/clagram.mjs`
+- Modify: `scripts/claudegram.mjs`
 
 - [ ] **Step 1: Add config, helpers for SSH/scp, and the pull/push commands**
 
-Append to `scripts/clagram.mjs`:
+Append to `scripts/claudegram.mjs`:
 
 ```js
 import { execFileSync } from 'node:child_process';
@@ -427,7 +427,7 @@ if (isMain) {
   const cmd = process.argv[2];
   if (cmd === 'pull') cmdPull();
   else if (cmd === 'push') cmdPush();
-  else { console.error('Usage: clagram pull | push [<id>]'); process.exit(1); }
+  else { console.error('Usage: claudegram pull | push [<id>]'); process.exit(1); }
 }
 ```
 
@@ -435,14 +435,14 @@ Note: the `isMain` guard is essential — without it, importing the module under
 
 - [ ] **Step 2: Re-run the unit tests (guard against regressions)**
 
-Run: `ssh contabo 'cd /opt/claudegram && node --test scripts/clagram.test.mjs'`
+Run: `ssh contabo 'cd /opt/claudegram && node --test scripts/claudegram.test.mjs'`
 Expected: PASS — 3 tests, 0 failures (importing the file must not error or hang).
 
 - [ ] **Step 3: Commit and push**
 
 ```bash
-ssh contabo 'cd /opt/claudegram && git add scripts/clagram.mjs && \
-git -c user.name="Cadu Oliveira" -c user.email="cadu@maxpan.com.br" commit -m "feat(clagram): pull/push session handoff over SSH" && \
+ssh contabo 'cd /opt/claudegram && git add scripts/claudegram.mjs && \
+git -c user.name="Cadu Oliveira" -c user.email="cadu@maxpan.com.br" commit -m "feat(claudegram): pull/push session handoff over SSH" && \
 git push origin private-responses'
 ```
 
@@ -451,26 +451,26 @@ git push origin private-responses'
 ### Task 5: Install on the Mac + end-to-end round-trip
 
 **Files (Mac):**
-- Create: `~/bin/clagram` (symlink) and shell PATH/config
+- Create: `~/bin/claudegram` (symlink) and shell PATH/config
 
 - [ ] **Step 1: Get the CLI onto the Mac and make it runnable**
 
 On the Mac:
 ```bash
-mkdir -p ~/bin ~/clagram-cli
-scp contabo:/opt/claudegram/scripts/clagram.mjs ~/clagram-cli/clagram.mjs
-chmod +x ~/clagram-cli/clagram.mjs
-ln -sf ~/clagram-cli/clagram.mjs ~/bin/clagram
+mkdir -p ~/bin ~/claudegram-cli
+scp contabo:/opt/claudegram/scripts/claudegram.mjs ~/claudegram-cli/claudegram.mjs
+chmod +x ~/claudegram-cli/claudegram.mjs
+ln -sf ~/claudegram-cli/claudegram.mjs ~/bin/claudegram
 # ensure ~/bin is on PATH (zsh):
 grep -q 'export PATH="$HOME/bin:$PATH"' ~/.zshrc || echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
 ```
-Then open a new shell or `source ~/.zshrc`. Run `clagram` (no args) → expect the usage error.
+Then open a new shell or `source ~/.zshrc`. Run `claudegram` (no args) → expect the usage error.
 
 - [ ] **Step 2: Telegram → Mac (pull)**
 
 In a Telegram topic, have a short real conversation (e.g. "lembre que meu número da sorte é 42"). Then on the Mac:
 ```bash
-clagram pull
+claudegram pull
 ```
 Pick that session. Run the printed `cd ... && claude --resume <id>` and ask "qual meu número da sorte?".
 Expected: Claude answers 42 (context carried from Telegram).
@@ -479,14 +479,14 @@ Expected: Claude answers 42 (context carried from Telegram).
 
 Continue on the Mac (e.g. "agora meu número é 99"), exit. Then:
 ```bash
-clagram push
+claudegram push
 ```
 Copy the printed `/adopt <id>`, send it in the target Telegram topic, then ask "qual meu número agora?".
 Expected: bot answers 99 (context carried back from the Mac).
 
 - [ ] **Step 4: Anti-clobber check**
 
-Run `clagram push <id>` again for a session whose VM copy is now newer (after Step 3's Telegram turn).
+Run `claudegram push <id>` again for a session whose VM copy is now newer (after Step 3's Telegram turn).
 Expected: it refuses with the "VM copy looks newer" message unless `--force`.
 
 - [ ] **Step 5: Record results**

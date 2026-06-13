@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// clagram — handoff Claude sessions between this Mac and the Telegram/VM bot.
+// claudegram — handoff Claude sessions between this Mac and the Telegram/VM bot.
 // Pure helpers (encodeProjectDir/parseSessions/compareForClobber) are unit-tested
-// in clagram.test.mjs. The pull/push orchestration is verified manually.
+// in claudegram.test.mjs. The pull/push orchestration is verified manually.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
@@ -142,5 +142,5 @@ if (isMain) {
   const cmd = process.argv[2];
   if (cmd === 'pull') cmdPull();
   else if (cmd === 'push') cmdPush();
-  else { console.error('Usage: clagram pull | push [<id>]'); process.exit(1); }
+  else { console.error('Usage: claudegram pull | push [<id>]'); process.exit(1); }
 }

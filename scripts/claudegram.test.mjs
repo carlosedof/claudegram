@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeProjectDir, parseSessions, compareForClobber } from './clagram.mjs';
+import { encodeProjectDir, parseSessions, compareForClobber } from './claudegram.mjs';
 
 test('encodeProjectDir replaces slashes with dashes', () => {
   assert.equal(encodeProjectDir('/workspace'), '-workspace');

@@ -20,3 +20,7 @@ MEDIUM_*.md
 # Local Python scripts (Medium scraper tooling)
 scripts/medium_fetch.py
 scripts/medium_login.py
+
+# VM-only: bind-mounted repos workspace and host-cred override (never commit)
+workspace/
+docker-compose.override.yml

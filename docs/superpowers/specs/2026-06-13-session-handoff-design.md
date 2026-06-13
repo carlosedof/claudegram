@@ -48,9 +48,9 @@ a fonte da verdade. O `session-id` nunca muda, então o histórico é contínuo 
 
 ### Componentes
 
-1. **CLI `clagram` (no Mac).** Único binário/script novo do lado do usuário. Subcomandos:
-   - `clagram pull [--pick]` — continuar no Mac uma conversa do Telegram.
-   - `clagram push [<session-id>]` — mandar uma conversa do Mac pro Telegram.
+1. **CLI `claudegram` (no Mac).** Único binário/script novo do lado do usuário. Subcomandos:
+   - `claudegram pull [--pick]` — continuar no Mac uma conversa do Telegram.
+   - `claudegram push [<session-id>]` — mandar uma conversa do Mac pro Telegram.
    - Config (env ou arquivo): `CLAGRAM_SSH_HOST=contabo`, `CLAGRAM_REMOTE_CWD=/workspace`,
      `CLAGRAM_LOCAL_WORKSPACE=/Users/caduolivera/Documents/projects/maxpan`.
 
