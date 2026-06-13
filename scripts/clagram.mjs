@@ -127,8 +127,8 @@ async function cmdPush() {
   const nameIdx = process.argv.indexOf('--name');
   const name = nameIdx !== -1 ? (process.argv[nameIdx + 1] || null) : null;
   const req = JSON.stringify({ id, name, ts: new Date().toISOString() });
-  execFileSync('ssh', [CFG.host, 'docker', 'exec', '-i', 'claudegram', 'sh', '-c',
-    `mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/${id}.json`],
+  execFileSync('ssh', [CFG.host,
+    `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/${id}.json'`],
     { input: req, encoding: 'utf8' });
   console.log(`\nPushed. The bot will create a new Telegram topic with this session shortly - open Telegram.`);
   console.log(`(Fallback if it does not appear: send "/adopt ${id}" in any topic.)`);
