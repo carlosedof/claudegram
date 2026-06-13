@@ -40,18 +40,18 @@ export function compareForClobber(dest, src) {
 }
 
 const CFG = {
-  host: process.env.CLAGRAM_SSH_HOST || 'contabo',
-  remoteCwd: process.env.CLAGRAM_REMOTE_CWD || '/workspace',
-  localWorkspace: process.env.CLAGRAM_LOCAL_WORKSPACE || join(homedir(), 'Documents/projects/maxpan'),
-  remoteHome: process.env.CLAGRAM_REMOTE_HOME || '/root',
+  host: process.env.CLAUDEGRAM_SSH_HOST || 'contabo',
+  remoteCwd: process.env.CLAUDEGRAM_REMOTE_CWD || '/workspace',
+  localWorkspace: process.env.CLAUDEGRAM_LOCAL_WORKSPACE || join(homedir(), 'Documents/projects/maxpan'),
+  remoteHome: process.env.CLAUDEGRAM_REMOTE_HOME || '/root',
 };
 
 const remoteProjDir = () => `${CFG.remoteHome}/.claude/projects/${encodeProjectDir(CFG.remoteCwd)}`;
 const localProjDir = () => join(homedir(), '.claude', 'projects', encodeProjectDir(CFG.localWorkspace));
 
 // Command used to open a pulled session locally. Defaults to the `claudeb`
-// alias expansion (skip permission prompts). Override with CLAGRAM_CLAUDE_CMD.
-const CLAUDE_CMD = (process.env.CLAGRAM_CLAUDE_CMD || 'claude --dangerously-skip-permissions').split(/\s+/);
+// alias expansion (skip permission prompts). Override with CLAUDEGRAM_CLAUDE_CMD.
+const CLAUDE_CMD = (process.env.CLAUDEGRAM_CLAUDE_CMD || 'claude --dangerously-skip-permissions').split(/\s+/);
 
 function sh(file, args) {
   return execFileSync(file, args, { encoding: 'utf8' });

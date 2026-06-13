@@ -51,8 +51,8 @@ a fonte da verdade. O `session-id` nunca muda, então o histórico é contínuo 
 1. **CLI `claudegram` (no Mac).** Único binário/script novo do lado do usuário. Subcomandos:
    - `claudegram pull [--pick]` — continuar no Mac uma conversa do Telegram.
    - `claudegram push [<session-id>]` — mandar uma conversa do Mac pro Telegram.
-   - Config (env ou arquivo): `CLAGRAM_SSH_HOST=contabo`, `CLAGRAM_REMOTE_CWD=/workspace`,
-     `CLAGRAM_LOCAL_WORKSPACE=/Users/caduolivera/Documents/projects/maxpan`.
+   - Config (env ou arquivo): `CLAUDEGRAM_SSH_HOST=contabo`, `CLAUDEGRAM_REMOTE_CWD=/workspace`,
+     `CLAUDEGRAM_LOCAL_WORKSPACE=/Users/caduolivera/Documents/projects/maxpan`.
 
 2. **Comando `/adopt` (no bot, ~15 linhas em `command.handler.ts`).** Necessário só pro `push`.
    Lista as sessões recém-`push`adas (ou aceita `<id>`) e fixa o `claudeSessionId` no tópico
@@ -65,7 +65,7 @@ a fonte da verdade. O `session-id` nunca muda, então o histórico é contínuo 
 
 1. CLI lê `sessions.json` da VM por SSH, lista tópicos (preview + `claudeSessionId`); usuário escolhe.
 2. CLI `scp` do `<id>.jsonl` (VM `-workspace`) → dir de projeto local do Mac.
-3. CLI roda/imprime `cd $CLAGRAM_LOCAL_WORKSPACE && claude --resume <id>`.
+3. CLI roda/imprime `cd $CLAUDEGRAM_LOCAL_WORKSPACE && claude --resume <id>`.
 4. Claude no Mac carrega o transcript (indexado pelo cwd local), resume com contexto completo.
    Paths `/workspace/...` internos viram histórico; ops novas rodam no cwd local — e com os
    nomes de repo unificados, resolvem por caminho relativo.

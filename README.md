@@ -152,6 +152,7 @@ Open your bot in Telegram → `/start`
 | `/sessions` | List saved sessions |
 | `/resume` | Pick from recent sessions |
 | `/continue` | Resume most recent session |
+| `/adopt <id>` | Adopt a session pushed from your machine (`claudegram push`) |
 | `/teleport` | Move session to terminal (forked) |
 
 ### Agent Modes
@@ -193,6 +194,50 @@ Open your bot in Telegram → `/start`
 | `/softreset` | Soft reset (cancel + clear session) |
 
 ---
+
+## Session Handoff
+
+Continue the **same conversation** across your local machine (`claude`) and Telegram/VM, with full context — start on one side and pick up on the other. Useful when the agent runs on a remote VM and you also use Claude Code locally on the same projects.
+
+**How it works:** a Claude session is a transcript file (`~/.claude/projects/<cwd-hash>/<session-id>.jsonl`). The `claudegram` CLI copies that transcript between machines over SSH and resumes it on the other side. The session id stays stable, so history is continuous. One side is active at a time (it's a handoff, not live sync); an anti-clobber check (by transcript line count) refuses to overwrite the side that has more content.
+
+### Install (local machine)
+
+The CLI is [`scripts/claudegram.mjs`](scripts/claudegram.mjs). On your local machine (needs Node 18+, `claude` on PATH, and an SSH host alias for the VM):
+
+```bash
+mkdir -p ~/bin ~/claudegram-cli
+scp <vm-host>:/opt/claudegram/scripts/claudegram.mjs ~/claudegram-cli/claudegram.mjs
+chmod +x ~/claudegram-cli/claudegram.mjs
+ln -sf ~/claudegram-cli/claudegram.mjs ~/bin/claudegram   # ensure ~/bin is on PATH
+```
+
+### Usage
+
+```bash
+# Telegram → local: pick a topic's session, download it, and launch `claude --resume`
+claudegram pull
+claudegram pull --print        # only print the resume command, don't launch
+
+# local → Telegram: send a session; the bot auto-creates a new topic with it ready
+claudegram push                # most recent local session
+claudegram push <session-id>   # a specific session
+claudegram push --name "Title" # set the new topic name (default: conversation preview)
+```
+
+On the Telegram side a pushed session is adopted automatically into a **new forum topic**. Manual fallback: `/adopt <id>` binds a pushed session id to the current topic.
+
+### Configuration (environment variables)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDEGRAM_SSH_HOST` | `contabo` | SSH host alias for the VM |
+| `CLAUDEGRAM_REMOTE_CWD` | `/workspace` | The agent's working dir on the VM (transcripts live under this cwd's project dir) |
+| `CLAUDEGRAM_LOCAL_WORKSPACE` | `~/Documents/projects/maxpan` | Local dir to resume sessions in — should mirror the VM workspace |
+| `CLAUDEGRAM_REMOTE_HOME` | `/root` | Home on the VM (where `.claude` lives) |
+| `CLAUDEGRAM_CLAUDE_CMD` | `claude --dangerously-skip-permissions` | Command used to open a pulled session locally |
+
+> For a clean handoff, the repo folders under the VM workspace and the local workspace should share the same names, so file paths resolve on both sides.
 
 ## Optional Integrations
 

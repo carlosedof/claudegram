@@ -346,10 +346,10 @@ import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 
 const CFG = {
-  host: process.env.CLAGRAM_SSH_HOST || 'contabo',
-  remoteCwd: process.env.CLAGRAM_REMOTE_CWD || '/workspace',
-  localWorkspace: process.env.CLAGRAM_LOCAL_WORKSPACE || join(homedir(), 'Documents/projects/maxpan'),
-  remoteHome: process.env.CLAGRAM_REMOTE_HOME || '/root',
+  host: process.env.CLAUDEGRAM_SSH_HOST || 'contabo',
+  remoteCwd: process.env.CLAUDEGRAM_REMOTE_CWD || '/workspace',
+  localWorkspace: process.env.CLAUDEGRAM_LOCAL_WORKSPACE || join(homedir(), 'Documents/projects/maxpan'),
+  remoteHome: process.env.CLAUDEGRAM_REMOTE_HOME || '/root',
 };
 
 const remoteProjDir = () => `${CFG.remoteHome}/.claude/projects/${encodeProjectDir(CFG.remoteCwd)}`;
