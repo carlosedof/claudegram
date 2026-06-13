@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { preventSleep, allowSleep } from './utils/caffeinate.js';
 import { stopCleanup } from './telegram/deduplication.js';
 import { sessionManager } from './claude/session-manager.js';
+import { startHandoffInbox } from './claude/handoff-inbox.js';
 
 async function main() {
   console.log('🤖 Starting Claudegram...');
@@ -29,6 +30,10 @@ async function main() {
   // Start concurrent runner — updates are processed in parallel,
   // with per-chat ordering enforced by the sequentialize middleware in bot.ts.
   // This lets /cancel bypass the per-chat queue and interrupt running queries.
+  // Watch the handoff inbox: `clagram push` drops a request and we create a
+  // new Telegram topic with the session adopted (no manual /adopt needed).
+  startHandoffInbox(bot);
+
   const runner = run(bot);
 
   // Graceful shutdown (guarded against duplicate signals)
