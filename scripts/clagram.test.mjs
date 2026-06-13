@@ -29,9 +29,9 @@ test('parseSessions returns latest entry per key with a claudeSessionId, newest 
   assert.equal(out[1].sessionKey, '111');
 });
 
-test('compareForClobber flags a newer/larger destination', () => {
-  assert.equal(compareForClobber(null, { mtimeMs: 1, lines: 1 }), 'safe');
-  assert.equal(compareForClobber({ mtimeMs: 100, lines: 5 }, { mtimeMs: 200, lines: 9 }), 'safe');
-  assert.equal(compareForClobber({ mtimeMs: 300, lines: 5 }, { mtimeMs: 200, lines: 9 }), 'dest-newer');
-  assert.equal(compareForClobber({ mtimeMs: 100, lines: 20 }, { mtimeMs: 200, lines: 9 }), 'dest-newer');
+test('compareForClobber refuses only when destination has more lines', () => {
+  assert.equal(compareForClobber(null, { lines: 1 }), 'safe');
+  assert.equal(compareForClobber({ lines: 5 }, { lines: 9 }), 'safe');       // dest behind -> overwrite ok
+  assert.equal(compareForClobber({ lines: 9 }, { lines: 9 }), 'safe');       // equal -> ok
+  assert.equal(compareForClobber({ lines: 20 }, { lines: 9 }), 'dest-newer'); // dest ahead -> refuse
 });

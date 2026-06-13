@@ -32,11 +32,11 @@ export function parseSessions(jsonString) {
   return out;
 }
 
-// dest/src: null or { mtimeMs: number, lines: number }. Returns 'safe' | 'dest-newer'.
+// dest/src: null or { lines: number }. The transcript is append-only, so more
+// lines = more content. Refuse only if the destination is strictly ahead.
 export function compareForClobber(dest, src) {
   if (!dest) return 'safe';
-  if (dest.mtimeMs > src.mtimeMs || dest.lines > src.lines) return 'dest-newer';
-  return 'safe';
+  return dest.lines > src.lines ? 'dest-newer' : 'safe';
 }
 
 const CFG = {
@@ -80,7 +80,7 @@ async function cmdPull() {
   mkdirSync(localProjDir(), { recursive: true });
   const force = process.argv.includes('--force');
   const remoteLines = Number(sh('ssh', [CFG.host, `wc -l < ${remoteProjDir()}/${id}.jsonl`]).trim()) + 1;
-  if (!force && compareForClobber(fileMeta(dest), { mtimeMs: Date.now(), lines: remoteLines }) === 'dest-newer') {
+  if (!force && compareForClobber(fileMeta(dest), { lines: remoteLines }) === 'dest-newer') {
     console.error(`Local copy looks newer/larger than the VM's. Re-run with --force to overwrite.`);
     process.exit(1);
   }
@@ -117,7 +117,7 @@ async function cmdPush() {
   const remoteExists = sh('ssh', [CFG.host, `test -f ${remoteProjDir()}/${id}.jsonl && echo yes || echo no`]).trim() === 'yes';
   if (remoteExists && !force) {
     const remoteLines = Number(sh('ssh', [CFG.host, `wc -l < ${remoteProjDir()}/${id}.jsonl`]).trim()) + 1;
-    if (compareForClobber({ mtimeMs: Date.now(), lines: remoteLines }, fileMeta(src)) === 'dest-newer') {
+    if (compareForClobber({ lines: remoteLines }, fileMeta(src)) === 'dest-newer') {
       console.error(`VM copy looks newer/larger. Re-run with --force to overwrite.`);
       process.exit(1);
     }
