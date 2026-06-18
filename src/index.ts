@@ -5,6 +5,7 @@ import { preventSleep, allowSleep } from './utils/caffeinate.js';
 import { stopCleanup } from './telegram/deduplication.js';
 import { sessionManager } from './claude/session-manager.js';
 import { startHandoffInbox } from './claude/handoff-inbox.js';
+import { startReconcileWatcher } from './claude/reconcile.js';
 
 async function main() {
   console.log('🤖 Starting Claudegram...');
@@ -33,6 +34,9 @@ async function main() {
   // Watch the handoff inbox: `claudegram push` drops a request and we create a
   // new Telegram topic with the session adopted (no manual /adopt needed).
   startHandoffInbox(bot);
+
+  // Reconcile topics deleted in Telegram (no delete event exists) when `claudegram sync` asks.
+  startReconcileWatcher(bot);
 
   const runner = run(bot);
 
