@@ -49,7 +49,20 @@ export function startHandoffInbox(bot: Bot): void {
   }
   const projectDir = config.WORKSPACE_DIR.replace(/\//g, '-');
 
+  // Re-entrancy guard: a slow cycle (creating many topics) must not overlap the
+  // next tick, or the same request files get processed twice → duplicate topics.
+  let processing = false;
   setInterval(async () => {
+    if (processing) return;
+    processing = true;
+    try {
+      await processInbox();
+    } finally {
+      processing = false;
+    }
+  }, POLL_MS);
+
+  async function processInbox(): Promise<void> {
     let files: string[];
     try {
       files = fs.readdirSync(INBOX).filter((f) => f.endsWith('.json') && !f.startsWith('_'));
@@ -73,6 +86,11 @@ export function startHandoffInbox(bot: Bot): void {
         try { fs.unlinkSync(reqPath); } catch { /* ignore */ }
         continue;
       }
+      // Claim the request up front: remove it before the slow createForumTopic
+      // call so a slow/overlapping cycle can never re-read it and create a
+      // duplicate topic. If creation fails below we drop it anyway (the /adopt
+      // fallback still works), so early removal does not lose recoverable work.
+      try { fs.unlinkSync(reqPath); } catch { /* ignore */ }
       try {
         const status = req.status === 'live' ? 'live' : req.status === 'ended' ? 'ended' : undefined;
         const emoji = status === 'live' ? '🟢' : status === 'ended' ? '💤' : '🔄';
@@ -90,16 +108,15 @@ export function startHandoffInbox(bot: Bot): void {
           ? '🟢 Sessão do Mac (ainda rodando lá) pronta aqui. Continuar por aqui enquanto roda no Mac pode divergir o histórico.'
           : '✅ Sessão do Mac pronta aqui. Manda uma mensagem pra continuar de onde parou.';
         await bot.api.sendMessage(groupId, ready, { message_thread_id: threadId });
-        fs.unlinkSync(reqPath);
         console.log(`[handoff-inbox] adopted ${id} into new topic ${threadId} ("${name}")`);
       } catch (err) {
-        // Likely a permissions/API error (bot needs can_manage_topics). Drop the
-        // request so it doesn't retry forever; the /adopt fallback still works.
+        // Likely a permissions/API error (bot needs can_manage_topics). The
+        // request was already claimed above, so it won't retry forever; the
+        // /adopt fallback still works.
         console.error('[handoff-inbox] failed for', f, '-', err instanceof Error ? err.message : String(err));
-        try { fs.unlinkSync(reqPath); } catch { /* ignore */ }
       }
     }
-  }, POLL_MS);
+  }
 
   console.log(`[handoff-inbox] watching ${INBOX} → group ${groupId} (every ${POLL_MS}ms)`);
 }

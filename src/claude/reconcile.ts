@@ -42,8 +42,13 @@ export async function reconcileDeletedTopics(bot: Bot): Promise<number> {
 
 /** Watch for the CLI's `_reconcile.json` control file and reconcile when it appears. */
 export function startReconcileWatcher(bot: Bot): void {
+  // Guard against overlapping reconcile passes: probing many threads can take
+  // longer than POLL_MS, and a second pass while the first runs is wasteful.
+  let running = false;
   setInterval(async () => {
+    if (running) return;
     if (!fs.existsSync(CONTROL)) return;
+    running = true;
     try {
       const n = await reconcileDeletedTopics(bot);
       console.log(`[reconcile] done — archived ${n} deleted topic(s)`);
@@ -51,6 +56,7 @@ export function startReconcileWatcher(bot: Bot): void {
       console.error('[reconcile] failed:', err instanceof Error ? err.message : String(err));
     } finally {
       try { fs.unlinkSync(CONTROL); } catch { /* ignore */ }
+      running = false;
     }
   }, POLL_MS);
   console.log(`[reconcile] watching ${CONTROL} (every ${POLL_MS}ms)`);
