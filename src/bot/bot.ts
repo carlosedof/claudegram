@@ -57,6 +57,7 @@ import {
 } from './handlers/command.handler.js';
 import { handleMessage } from './handlers/message.handler.js';
 import { handleVoice } from './handlers/voice.handler.js';
+import { handleTopicClosed } from './handlers/topic-closed.handler.js';
 import { handlePhoto, handleImageDocument } from './handlers/photo.handler.js';
 
 // Resolve sequentialize constraint: same-chat updates are ordered,
@@ -251,6 +252,9 @@ export async function createBot(): Promise<Bot> {
   });
 
   // Handle voice messages
+  // Retire + delete a session's topic when the user closes it.
+  bot.on('message:forum_topic_closed', handleTopicClosed);
+
   bot.on('message:voice', handleVoice);
 
   // Handle audio messages (music/audio files - separate from voice notes)

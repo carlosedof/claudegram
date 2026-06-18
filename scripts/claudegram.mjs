@@ -39,6 +39,45 @@ export function compareForClobber(dest, src) {
   return dest.lines > src.lines ? 'dest-newer' : 'safe';
 }
 
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+// UUIDs of running `claude` processes that carry --session-id. Input: `ps -ww -o command=`.
+export function parseLiveSessionIds(psText) {
+  const ids = new Set();
+  for (const line of psText.split('\n')) {
+    if (!/\bclaude\b/.test(line) || !line.includes('--session-id')) continue;
+    const m = line.match(new RegExp(`--session-id[ =](${UUID_RE.source})`, 'i'));
+    if (m) ids.add(m[1].toLowerCase());
+  }
+  return [...ids];
+}
+
+// The session's current auto-title: the last `ai-title` record's aiTitle, trimmed. null if none.
+export function extractAiTitle(jsonlText) {
+  let title = null;
+  for (const line of jsonlText.split('\n')) {
+    if (!line.includes('"ai-title"')) continue;
+    try {
+      const o = JSON.parse(line);
+      if (o && o.type === 'ai-title' && typeof o.aiTitle === 'string' && o.aiTitle.trim()) {
+        title = o.aiTitle.trim();
+      }
+    } catch { /* skip malformed line */ }
+  }
+  return title;
+}
+
+// Inclusive recency check.
+export function withinDays(mtimeMs, nowMs, days) {
+  return nowMs - mtimeMs <= days * 24 * 60 * 60 * 1000;
+}
+
+// Drop candidates whose id already has a topic (existingIds) or is retired (archivedIds).
+export function selectToPush(candidates, existingIds, archivedIds) {
+  const skip = new Set([...existingIds, ...archivedIds]);
+  return candidates.filter((c) => !skip.has(c.id));
+}
+
 const CFG = {
   host: process.env.CLAUDEGRAM_SSH_HOST || 'contabo',
   remoteCwd: process.env.CLAUDEGRAM_REMOTE_CWD || '/workspace',
@@ -134,6 +173,99 @@ async function cmdPush() {
   console.log(`(Fallback if it does not appear: send "/adopt ${id}" in any topic.)`);
 }
 
+function readRemoteSessions() {
+  return sh('ssh', [CFG.host, 'docker', 'exec', 'claudegram', 'cat', '/root/.claudegram/sessions.json']);
+}
+
+function readRemoteArchived() {
+  try {
+    const txt = sh('ssh', [CFG.host, 'docker', 'exec', 'claudegram', 'sh', '-c',
+      'cat /root/.claudegram/archived.json 2>/dev/null || echo "{}"']);
+    const o = JSON.parse(txt);
+    return Array.isArray(o.ids) ? o.ids : [];
+  } catch {
+    return [];
+  }
+}
+
+// Drop a control file the bot's reconcile watcher consumes; wait (best-effort) for it
+// to be processed so the archived list is fresh before we decide what to push.
+async function triggerReconcile() {
+  const req = JSON.stringify({ ts: new Date().toISOString() });
+  try {
+    execFileSync('ssh', [CFG.host,
+      `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/_reconcile.json'`],
+      { input: req, encoding: 'utf8' });
+    for (let i = 0; i < 16; i++) {
+      const exists = sh('ssh', [CFG.host,
+        `docker exec claudegram sh -c 'test -f /root/.claudegram/handoff-inbox/_reconcile.json && echo yes || echo no'`]).trim();
+      if (exists === 'no') return;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } catch {
+    // best-effort: dedup still holds via the existing-sessions check
+  }
+}
+
+async function cmdSync() {
+  const now = Date.now();
+  const DAYS = Number(process.env.CLAUDEGRAM_SYNC_DAYS || 7);
+
+  // 1. Live sessions = running `claude` procs carrying --session-id.
+  let liveIds = [];
+  try { liveIds = parseLiveSessionIds(sh('ps', ['-ww', '-o', 'command='])); } catch { liveIds = []; }
+  const liveSet = new Set(liveIds);
+
+  // 2. Candidate transcripts across every local project: live OR mtime within DAYS.
+  const projectsRoot = join(homedir(), '.claude', 'projects');
+  const candidates = [];
+  const seen = new Set();
+  let projDirs = [];
+  try { projDirs = readdirSync(projectsRoot); } catch { projDirs = []; }
+  for (const pd of projDirs) {
+    const dir = join(projectsRoot, pd);
+    let files = [];
+    try { files = readdirSync(dir).filter((f) => f.endsWith('.jsonl')); } catch { continue; }
+    for (const f of files) {
+      const id = f.replace(/\.jsonl$/, '');
+      if (seen.has(id)) continue;
+      const full = join(dir, f);
+      let mtimeMs;
+      try { mtimeMs = statSync(full).mtimeMs; } catch { continue; }
+      const live = liveSet.has(id);
+      if (!live && !withinDays(mtimeMs, now, DAYS)) continue;
+      seen.add(id);
+      let title = null;
+      try { title = extractAiTitle(readFileSync(full, 'utf8')); } catch { /* no title */ }
+      candidates.push({ id, path: full, name: title, status: live ? 'live' : 'ended' });
+    }
+  }
+  if (!candidates.length) {
+    console.log(`No live or recent (≤${DAYS}d) sessions to sync.`);
+    return;
+  }
+
+  // 3. Reconcile deleted topics, then read what the VM already has + what's retired.
+  await triggerReconcile();
+  const existingIds = parseSessions(readRemoteSessions()).map((s) => s.claudeSessionId);
+  const archivedIds = readRemoteArchived();
+
+  // 4. Push only sessions without a topic and not retired.
+  const toPush = selectToPush(candidates, existingIds, archivedIds);
+  let created = 0;
+  for (const c of toPush) {
+    sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
+    const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, ts: new Date().toISOString() });
+    execFileSync('ssh', [CFG.host,
+      `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/${c.id}.json'`],
+      { input: req, encoding: 'utf8' });
+    created++;
+    console.log(`  + ${c.status === 'live' ? '🟢' : '💤'} ${c.name || c.id}`);
+  }
+  console.log(`\nSynced: ${created} new topic(s) · ${candidates.length - toPush.length} already existed/retired · ${liveSet.size} live.`);
+  if (created) console.log('Open Telegram — topics appear within a few seconds.');
+}
+
 // Only dispatch when run directly (not when imported by the test file), so
 // `node --test` importing this module has zero side effects.
 const invoked = process.argv[1] ? realpathSync(process.argv[1]) : '';
@@ -142,5 +274,6 @@ if (isMain) {
   const cmd = process.argv[2];
   if (cmd === 'pull') cmdPull();
   else if (cmd === 'push') cmdPush();
-  else { console.error('Usage: claudegram pull | push [<id>]'); process.exit(1); }
+  else if (cmd === 'sync') cmdSync();
+  else { console.error('Usage: claudegram pull | push [<id>] | sync'); process.exit(1); }
 }

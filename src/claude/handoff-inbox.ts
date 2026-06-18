@@ -52,13 +52,13 @@ export function startHandoffInbox(bot: Bot): void {
   setInterval(async () => {
     let files: string[];
     try {
-      files = fs.readdirSync(INBOX).filter((f) => f.endsWith('.json'));
+      files = fs.readdirSync(INBOX).filter((f) => f.endsWith('.json') && !f.startsWith('_'));
     } catch {
       return;
     }
     for (const f of files) {
       const reqPath = path.join(INBOX, f);
-      let req: { id?: string; name?: string | null };
+      let req: { id?: string; name?: string | null; status?: string };
       try {
         req = JSON.parse(fs.readFileSync(reqPath, 'utf8'));
       } catch {
@@ -74,18 +74,22 @@ export function startHandoffInbox(bot: Bot): void {
         continue;
       }
       try {
-        const name = (req.name || deriveName(transcript)).slice(0, 60);
+        const status = req.status === 'live' ? 'live' : req.status === 'ended' ? 'ended' : undefined;
+        const emoji = status === 'live' ? '🟢' : status === 'ended' ? '💤' : '🔄';
+        const raw = (req.name && req.name.trim())
+          ? req.name.trim()
+          : deriveName(transcript).replace(/^🔄\s*/, '');
+        const name = `${emoji} ${raw}`.slice(0, 60);
         const topic = await bot.api.createForumTopic(groupId, name);
         const threadId = topic.message_thread_id;
         const sessionKey = buildSessionKey(groupId, threadId);
         clearConversation(sessionKey);
         sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
         sessionManager.setClaudeSessionId(sessionKey, id);
-        await bot.api.sendMessage(
-          groupId,
-          '✅ Sessão do Mac pronta aqui. Manda uma mensagem pra continuar de onde parou.',
-          { message_thread_id: threadId },
-        );
+        const ready = status === 'live'
+          ? '🟢 Sessão do Mac (ainda rodando lá) pronta aqui. Continuar por aqui enquanto roda no Mac pode divergir o histórico.'
+          : '✅ Sessão do Mac pronta aqui. Manda uma mensagem pra continuar de onde parou.';
+        await bot.api.sendMessage(groupId, ready, { message_thread_id: threadId });
         fs.unlinkSync(reqPath);
         console.log(`[handoff-inbox] adopted ${id} into new topic ${threadId} ("${name}")`);
       } catch (err) {
