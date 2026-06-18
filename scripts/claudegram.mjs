@@ -39,6 +39,45 @@ export function compareForClobber(dest, src) {
   return dest.lines > src.lines ? 'dest-newer' : 'safe';
 }
 
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+// UUIDs of running `claude` processes that carry --session-id. Input: `ps -ww -o command=`.
+export function parseLiveSessionIds(psText) {
+  const ids = new Set();
+  for (const line of psText.split('\n')) {
+    if (!/\bclaude\b/.test(line) || !line.includes('--session-id')) continue;
+    const m = line.match(new RegExp(`--session-id[ =](${UUID_RE.source})`, 'i'));
+    if (m) ids.add(m[1].toLowerCase());
+  }
+  return [...ids];
+}
+
+// The session's current auto-title: the last `ai-title` record's aiTitle, trimmed. null if none.
+export function extractAiTitle(jsonlText) {
+  let title = null;
+  for (const line of jsonlText.split('\n')) {
+    if (!line.includes('"ai-title"')) continue;
+    try {
+      const o = JSON.parse(line);
+      if (o && o.type === 'ai-title' && typeof o.aiTitle === 'string' && o.aiTitle.trim()) {
+        title = o.aiTitle.trim();
+      }
+    } catch { /* skip malformed line */ }
+  }
+  return title;
+}
+
+// Inclusive recency check.
+export function withinDays(mtimeMs, nowMs, days) {
+  return nowMs - mtimeMs <= days * 24 * 60 * 60 * 1000;
+}
+
+// Drop candidates whose id already has a topic (existingIds) or is retired (archivedIds).
+export function selectToPush(candidates, existingIds, archivedIds) {
+  const skip = new Set([...existingIds, ...archivedIds]);
+  return candidates.filter((c) => !skip.has(c.id));
+}
+
 const CFG = {
   host: process.env.CLAUDEGRAM_SSH_HOST || 'contabo',
   remoteCwd: process.env.CLAUDEGRAM_REMOTE_CWD || '/workspace',
