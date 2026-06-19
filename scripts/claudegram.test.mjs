@@ -7,6 +7,7 @@ import {
   withinDays,
   selectToPush,
   condenseTranscript,
+  isRecapTranscript,
 } from './claudegram.mjs';
 
 test('encodeProjectDir replaces slashes with dashes', () => {
@@ -109,4 +110,17 @@ test('condenseTranscript returns empty string when nothing readable', () => {
     'not json',
   ].join('\n');
   assert.equal(condenseTranscript(jsonl), '');
+});
+
+test('isRecapTranscript flags recap-generation sessions, not real ones', () => {
+  const recap = JSON.stringify({
+    type: 'user',
+    message: { content: 'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code\n(linhas...)' },
+  });
+  const real = JSON.stringify({ type: 'user', message: { content: 'investiga o bug do cashback' } });
+  assert.equal(isRecapTranscript(recap), true);
+  assert.equal(isRecapTranscript(real), false);
+  // first user message wins (array-form content)
+  const arr = JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code' }] } });
+  assert.equal(isRecapTranscript(arr), true);
 });

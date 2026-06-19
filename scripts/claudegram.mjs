@@ -134,17 +134,42 @@ function sh(file, args) {
   return execFileSync(file, args, { encoding: 'utf8' });
 }
 
+// First line of the recap prompt. Doubles as a signature: a `claude -p` recap
+// call is itself a session whose first user message is this prompt, so we use it
+// to recognize and skip recap-generation transcripts (see isRecapTranscript).
+const RECAP_PROMPT_HEADER =
+  'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code';
+
+// True if a transcript is a recap-generation session (its first user message is
+// the recap prompt). Those must never be synced as topics — otherwise every sync
+// turns prior recap calls into junk topics, compounding each run.
+export function isRecapTranscript(jsonlText) {
+  for (const line of jsonlText.split('\n')) {
+    if (!line.includes('"user"')) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    if (d.type !== 'user') continue;
+    const c = d.message && d.message.content;
+    const text = typeof c === 'string'
+      ? c
+      : Array.isArray(c) && c[0] && typeof c[0].text === 'string' ? c[0].text : '';
+    return text.includes(RECAP_PROMPT_HEADER);
+  }
+  return false;
+}
+
 // Generate a short recap of a session to post as the first message of its
 // Telegram topic, so the title alone isn't the only context. Summarizes the
-// condensed transcript with a cheap local `claude -p` call. Returns null (and
-// the bot falls back to just the ready line) if there's nothing to summarize or
-// the call fails — recap is best-effort, never blocks the handoff.
+// condensed transcript with a cheap local `claude -p` call. `--no-session-persistence`
+// keeps the call from writing its own transcript into ~/.claude/projects (which
+// would otherwise be re-synced as junk topics). Returns null (and the bot falls
+// back to just the ready line) if there's nothing to summarize or the call fails.
 function generateRecap(jsonlText) {
   const condensed = condenseTranscript(jsonlText);
   if (!condensed) return null;
   const model = process.env.CLAUDEGRAM_RECAP_MODEL || 'claude-haiku-4-5';
   const prompt = [
-    'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code',
+    RECAP_PROMPT_HEADER,
     '(linhas [U]=usuário, [A]=assistente). Escreva um recap em português de 2 a 4 linhas',
     'curtas para servir de contexto no topo de um tópico do Telegram: do que se trata,',
     'o que foi feito/decidido, e o estado atual. Sem saudação, sem markdown, sem listas,',
@@ -154,7 +179,7 @@ function generateRecap(jsonlText) {
     condensed,
   ].join('\n');
   try {
-    const out = execFileSync('claude', ['-p', '--model', model], {
+    const out = execFileSync('claude', ['-p', '--no-session-persistence', '--model', model], {
       input: prompt,
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
@@ -305,8 +330,11 @@ async function cmdSync() {
       const live = liveSet.has(id);
       if (!live && !withinDays(mtimeMs, now, DAYS)) continue;
       seen.add(id);
-      let title = null;
-      try { title = extractAiTitle(readFileSync(full, 'utf8')); } catch { /* no title */ }
+      let text = '';
+      try { text = readFileSync(full, 'utf8'); } catch { continue; }
+      // Skip recap-generation sessions so they never become topics.
+      if (isRecapTranscript(text)) continue;
+      const title = extractAiTitle(text);
       candidates.push({ id, path: full, name: title, status: live ? 'live' : 'ended' });
     }
   }
