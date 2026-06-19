@@ -344,7 +344,10 @@ async function cmdSync() {
 
   // 1. Live sessions = running `claude` procs carrying --session-id.
   let liveIds = [];
-  try { liveIds = parseLiveSessionIds(sh('ps', ['-ww', '-o', 'command='])); } catch { liveIds = []; }
+  // -axww (not just -ww): list ALL users' procs and ignore the controlling
+  // terminal, so live detection also works when run headless (cron/launchd has
+  // no TTY — a plain `ps -ww` would see none of the interactive `claude` procs).
+  try { liveIds = parseLiveSessionIds(sh('ps', ['-axww', '-o', 'command='])); } catch { liveIds = []; }
   const liveSet = new Set(liveIds);
 
   // 2. Candidate transcripts across every local project: live OR mtime within DAYS.
