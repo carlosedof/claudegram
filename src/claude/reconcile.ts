@@ -10,16 +10,21 @@ import { parseSessionKey } from '../utils/session-key.js';
 const CONTROL = path.join(os.homedir(), '.claudegram', 'handoff-inbox', '_reconcile.json');
 const POLL_MS = 2000;
 
-// Telegram has no read-only "get topic" call, so we poke a typing action: a
-// deleted thread responds with "message thread not found".
+// Telegram has no read-only "get topic" call. sendChatAction is useless here —
+// it returns ok even for a deleted topic. reopenForumTopic is the reliable
+// probe: an existing (open) topic answers TOPIC_NOT_MODIFIED (no-op, no visible
+// change), while a deleted topic answers TOPIC_ID_INVALID. (A closed topic would
+// be reopened, but our close handler deletes closed topics, so reconcile never
+// meets one.)
 async function threadExists(bot: Bot, chatId: number, threadId: number): Promise<boolean> {
   try {
-    await bot.api.sendChatAction(chatId, 'typing', { message_thread_id: threadId });
-    return true;
+    await bot.api.reopenForumTopic(chatId, threadId);
+    return true; // reopened successfully → exists
   } catch (err) {
     const desc = err instanceof GrammyError ? err.description
       : err instanceof Error ? err.message : String(err);
-    if (/thread not found/i.test(desc)) return false;
+    if (/TOPIC_NOT_MODIFIED/i.test(desc)) return true; // already open → exists
+    if (/TOPIC_ID_INVALID|thread not found|TOPIC_DELETED/i.test(desc)) return false; // gone
     return true; // unknown error: assume it exists, never false-archive
   }
 }
