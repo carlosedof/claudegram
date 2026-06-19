@@ -6,6 +6,7 @@ import {
   extractAiTitle,
   withinDays,
   selectToPush,
+  refreshAction,
   condenseTranscript,
   isRecapTranscript,
 } from './claudegram.mjs';
@@ -81,6 +82,12 @@ test('selectToPush drops ids already having a topic or archived', () => {
   const candidates = [{ id: 'keep' }, { id: 'has-topic' }, { id: 'retired' }];
   const out = selectToPush(candidates, ['has-topic'], ['retired']);
   assert.deepEqual(out.map((c) => c.id), ['keep']);
+});
+
+test('refreshAction: push when local ahead, behind when vm ahead, same when equal', () => {
+  assert.equal(refreshAction(120, 80), 'push');   // continued locally after pull
+  assert.equal(refreshAction(80, 120), 'behind');  // continued in Telegram — don't clobber
+  assert.equal(refreshAction(50, 50), 'same');
 });
 
 test('condenseTranscript keeps user asks + assistant prose, drops tool/thinking noise', () => {

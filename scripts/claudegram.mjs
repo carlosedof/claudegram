@@ -78,6 +78,16 @@ export function selectToPush(candidates, existingIds, archivedIds) {
   return candidates.filter((c) => !skip.has(c.id));
 }
 
+// For a session that already has a topic, decide what to do based on transcript
+// length (append-only, so more lines = more conversation): 'push' the local copy
+// up when it's ahead (you continued locally after a pull), skip as 'behind' when
+// the VM is ahead (you continued in Telegram — don't clobber), 'same' otherwise.
+export function refreshAction(localLines, vmLines) {
+  if (localLines > vmLines) return 'push';
+  if (vmLines > localLines) return 'behind';
+  return 'same';
+}
+
 // Extract the readable conversation (user asks + assistant prose) from a
 // transcript, dropping tool calls, thinking, results and other noise, then
 // keep the first turn (the original ask = the topic) plus the last `tailTurns`
@@ -283,6 +293,26 @@ function readRemoteArchived() {
   }
 }
 
+// Line count of each id's transcript on the VM, in one ssh round-trip. Normalized
+// to match fileMeta's local count (newlines + 1); missing files report 0.
+function readRemoteLineCounts(ids) {
+  if (!ids.length) return {};
+  const dir = remoteProjDir();
+  const cmd = ids.map((id) => `echo "${id} $(wc -l < ${dir}/${id}.jsonl 2>/dev/null || echo -1)"`).join('; ');
+  const map = {};
+  try {
+    for (const line of sh('ssh', [CFG.host, cmd]).split('\n')) {
+      const [id, n] = line.trim().split(/\s+/);
+      if (!id) continue;
+      const raw = Number(n);
+      map[id] = Number.isFinite(raw) && raw >= 0 ? raw + 1 : 0;
+    }
+  } catch {
+    // leave map partial/empty; callers treat missing as 0 (local wins → safe refresh)
+  }
+  return map;
+}
+
 // Drop a control file the bot's reconcile watcher consumes, then wait until it's
 // processed so the archived list is fresh BEFORE we decide what to push.
 // Reconcile probes every known topic (one rate-limited reopenForumTopic call
@@ -355,6 +385,8 @@ async function cmdSync() {
   const archivedIds = readRemoteArchived();
 
   // 4. Push only sessions without a topic and not retired.
+  const existingSet = new Set(existingIds);
+  const archivedSet = new Set(archivedIds);
   const toPush = selectToPush(candidates, existingIds, archivedIds);
   let created = 0;
   const wantRecap = !process.env.CLAUDEGRAM_NO_RECAP;
@@ -371,7 +403,30 @@ async function cmdSync() {
     created++;
     console.log(`  + ${c.status === 'live' ? '🟢' : '💤'} ${c.name || c.id}${recap ? ' 📋' : ''}`);
   }
-  console.log(`\nSynced: ${created} new topic(s) · ${candidates.length - toPush.length} already existed/retired · ${liveSet.size} live.`);
+
+  // 5. Refresh transcripts of sessions that already have a topic: if the local
+  // copy is ahead (you continued locally after a pull), push it up so continuing
+  // in Telegram resumes from the latest. Never clobber a VM copy that's ahead.
+  const toRefresh = candidates.filter((c) => existingSet.has(c.id) && !archivedSet.has(c.id));
+  const vmCounts = readRemoteLineCounts(toRefresh.map((c) => c.id));
+  let refreshed = 0;
+  let behind = 0;
+  for (const c of toRefresh) {
+    const localLines = fileMeta(c.path)?.lines ?? 0;
+    const vmLines = vmCounts[c.id] ?? 0;
+    const action = refreshAction(localLines, vmLines);
+    if (action === 'push') {
+      sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
+      refreshed++;
+      console.log(`  ↻ ${c.name || c.id} (local ${localLines} → VM, estava ${vmLines})`);
+    } else if (action === 'behind') {
+      behind++;
+      console.log(`  ⚠ ${c.name || c.id}: VM à frente (${vmLines} > ${localLines}) — não sobrescrevi (dê um pull antes)`);
+    }
+  }
+
+  const refreshNote = refreshed || behind ? ` · ↻ ${refreshed} refreshed${behind ? ` · ⚠ ${behind} VM-ahead` : ''}` : '';
+  console.log(`\nSynced: ${created} new topic(s) · ${candidates.length - toPush.length} already existed/retired${refreshNote} · ${liveSet.size} live.`);
   if (created) console.log('Open Telegram — topics appear within a few seconds.');
 }
 
