@@ -283,20 +283,26 @@ function readRemoteArchived() {
   }
 }
 
-// Drop a control file the bot's reconcile watcher consumes; wait (best-effort) for it
-// to be processed so the archived list is fresh before we decide what to push.
+// Drop a control file the bot's reconcile watcher consumes, then wait until it's
+// processed so the archived list is fresh BEFORE we decide what to push.
+// Reconcile probes every known topic (one rate-limited reopenForumTopic call
+// each), so it can take a while with many topics — we must wait for it to finish,
+// otherwise a session archived by reconcile gets re-pushed in the same run.
 async function triggerReconcile() {
   const req = JSON.stringify({ ts: new Date().toISOString() });
+  const maxWaitMs = Number(process.env.CLAUDEGRAM_RECONCILE_WAIT_MS || 180000);
   try {
     execFileSync('ssh', [CFG.host,
       `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/_reconcile.json'`],
       { input: req, encoding: 'utf8' });
-    for (let i = 0; i < 16; i++) {
+    const deadline = Date.now() + maxWaitMs;
+    while (Date.now() < deadline) {
       const exists = sh('ssh', [CFG.host,
         `docker exec claudegram sh -c 'test -f /root/.claudegram/handoff-inbox/_reconcile.json && echo yes || echo no'`]).trim();
       if (exists === 'no') return;
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 2000));
     }
+    console.error('  (reconcile did not finish within wait window; proceeding — a stale delete may re-sync once)');
   } catch {
     // best-effort: dedup still holds via the existing-sessions check
   }
