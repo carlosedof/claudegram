@@ -6,6 +6,7 @@ import {
   extractAiTitle,
   withinDays,
   selectToPush,
+  condenseTranscript,
 } from './claudegram.mjs';
 
 test('encodeProjectDir replaces slashes with dashes', () => {
@@ -79,4 +80,33 @@ test('selectToPush drops ids already having a topic or archived', () => {
   const candidates = [{ id: 'keep' }, { id: 'has-topic' }, { id: 'retired' }];
   const out = selectToPush(candidates, ['has-topic'], ['retired']);
   assert.deepEqual(out.map((c) => c.id), ['keep']);
+});
+
+test('condenseTranscript keeps user asks + assistant prose, drops tool/thinking noise', () => {
+  const jsonl = [
+    JSON.stringify({ type: 'user', message: { content: 'investiga o bug do cashback' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [
+      { type: 'thinking', thinking: 'secret reasoning' },
+      { type: 'tool_use', name: 'Bash', input: {} },
+      { type: 'text', text: 'Achei a causa: validação só roda com cashback ativo.' },
+    ] } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'exit 0' }] } }), // noise: no text
+    JSON.stringify({ type: 'system', content: 'ignored' }),
+    JSON.stringify({ type: 'user', message: { content: 'abre o PR' } }),
+  ].join('\n');
+  const out = condenseTranscript(jsonl);
+  assert.match(out, /\[U\] investiga o bug do cashback/);
+  assert.match(out, /\[A\] Achei a causa/);
+  assert.match(out, /\[U\] abre o PR/);
+  assert.doesNotMatch(out, /secret reasoning/);
+  assert.doesNotMatch(out, /exit 0/);
+});
+
+test('condenseTranscript returns empty string when nothing readable', () => {
+  const jsonl = [
+    JSON.stringify({ type: 'system', content: 'x' }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'B' }] } }),
+    'not json',
+  ].join('\n');
+  assert.equal(condenseTranscript(jsonl), '');
 });

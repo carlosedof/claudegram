@@ -78,6 +78,44 @@ export function selectToPush(candidates, existingIds, archivedIds) {
   return candidates.filter((c) => !skip.has(c.id));
 }
 
+// Extract the readable conversation (user asks + assistant prose) from a
+// transcript, dropping tool calls, thinking, results and other noise, then
+// keep the first turn (the original ask = the topic) plus the last `tailTurns`
+// turns (the current state). Each turn is capped, and the whole thing is bounded
+// so it's cheap to summarize. Returns '' when there's nothing readable.
+export function condenseTranscript(jsonlText, opts = {}) {
+  const { tailTurns = 16, perTurn = 500, maxChars = 9000 } = opts;
+  const turns = [];
+  for (const line of jsonlText.split('\n')) {
+    if (!line.trim()) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    const role = d.type === 'user' ? 'U' : d.type === 'assistant' ? 'A' : null;
+    if (!role) continue;
+    const content = d.message && d.message.content;
+    let text = '';
+    if (typeof content === 'string') {
+      text = content;
+    } else if (Array.isArray(content)) {
+      text = content
+        .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+        .map((b) => b.text)
+        .join(' ');
+    }
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text) turns.push(`[${role}] ${text.slice(0, perTurn)}`);
+  }
+  if (!turns.length) return '';
+  const head = turns[0];
+  const tail = turns.length > tailTurns ? turns.slice(-tailTurns) : turns.slice(1);
+  const lines = [head];
+  if (turns.length > tail.length + 1) lines.push('...');
+  for (const t of tail) if (t !== head) lines.push(t);
+  let out = lines.join('\n');
+  if (out.length > maxChars) out = head + '\n...\n' + out.slice(-(maxChars - head.length - 5));
+  return out;
+}
+
 const CFG = {
   host: process.env.CLAUDEGRAM_SSH_HOST || 'contabo',
   remoteCwd: process.env.CLAUDEGRAM_REMOTE_CWD || '/workspace',
@@ -94,6 +132,38 @@ const CLAUDE_CMD = (process.env.CLAUDEGRAM_CLAUDE_CMD || 'claude --dangerously-s
 
 function sh(file, args) {
   return execFileSync(file, args, { encoding: 'utf8' });
+}
+
+// Generate a short recap of a session to post as the first message of its
+// Telegram topic, so the title alone isn't the only context. Summarizes the
+// condensed transcript with a cheap local `claude -p` call. Returns null (and
+// the bot falls back to just the ready line) if there's nothing to summarize or
+// the call fails — recap is best-effort, never blocks the handoff.
+function generateRecap(jsonlText) {
+  const condensed = condenseTranscript(jsonlText);
+  if (!condensed) return null;
+  const model = process.env.CLAUDEGRAM_RECAP_MODEL || 'claude-haiku-4-5';
+  const prompt = [
+    'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code',
+    '(linhas [U]=usuário, [A]=assistente). Escreva um recap em português de 2 a 4 linhas',
+    'curtas para servir de contexto no topo de um tópico do Telegram: do que se trata,',
+    'o que foi feito/decidido, e o estado atual. Sem saudação, sem markdown, sem listas,',
+    'apenas o texto do recap.',
+    '',
+    '--- TRANSCRIÇÃO ---',
+    condensed,
+  ].join('\n');
+  try {
+    const out = execFileSync('claude', ['-p', '--model', model], {
+      input: prompt,
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const recap = (out || '').trim();
+    return recap ? recap.slice(0, 600) : null;
+  } catch {
+    return null;
+  }
 }
 
 function fileMeta(p) {
@@ -253,14 +323,19 @@ async function cmdSync() {
   // 4. Push only sessions without a topic and not retired.
   const toPush = selectToPush(candidates, existingIds, archivedIds);
   let created = 0;
+  const wantRecap = !process.env.CLAUDEGRAM_NO_RECAP;
   for (const c of toPush) {
     sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
-    const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, ts: new Date().toISOString() });
+    let recap = null;
+    if (wantRecap) {
+      try { recap = generateRecap(readFileSync(c.path, 'utf8')); } catch { recap = null; }
+    }
+    const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, recap, ts: new Date().toISOString() });
     execFileSync('ssh', [CFG.host,
       `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/${c.id}.json'`],
       { input: req, encoding: 'utf8' });
     created++;
-    console.log(`  + ${c.status === 'live' ? '🟢' : '💤'} ${c.name || c.id}`);
+    console.log(`  + ${c.status === 'live' ? '🟢' : '💤'} ${c.name || c.id}${recap ? ' 📋' : ''}`);
   }
   console.log(`\nSynced: ${created} new topic(s) · ${candidates.length - toPush.length} already existed/retired · ${liveSet.size} live.`);
   if (created) console.log('Open Telegram — topics appear within a few seconds.');
