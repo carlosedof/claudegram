@@ -71,7 +71,7 @@ export function startHandoffInbox(bot: Bot): void {
     }
     for (const f of files) {
       const reqPath = path.join(INBOX, f);
-      let req: { id?: string; name?: string | null; status?: string };
+      let req: { id?: string; name?: string | null; status?: string; recap?: string | null };
       try {
         req = JSON.parse(fs.readFileSync(reqPath, 'utf8'));
       } catch {
@@ -104,6 +104,12 @@ export function startHandoffInbox(bot: Bot): void {
         clearConversation(sessionKey);
         sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
         sessionManager.setClaudeSessionId(sessionKey, id);
+        // Recap first (so it's the opening message and gives context beyond the
+        // title), then the ready line.
+        const recap = (req.recap && req.recap.trim()) ? req.recap.trim() : null;
+        if (recap) {
+          await bot.api.sendMessage(groupId, `📋 ${recap}`, { message_thread_id: threadId });
+        }
         const ready = status === 'live'
           ? '🟢 Sessão do Mac (ainda rodando lá) pronta aqui. Continuar por aqui enquanto roda no Mac pode divergir o histórico.'
           : '✅ Sessão do Mac pronta aqui. Manda uma mensagem pra continuar de onde parou.';
