@@ -71,26 +71,31 @@ export function startHandoffInbox(bot: Bot): void {
     }
     for (const f of files) {
       const reqPath = path.join(INBOX, f);
+      // Atomic, cross-process claim: rename the request before doing anything.
+      // Only the process that wins the rename proceeds; a second drainer (e.g. a
+      // brief two-container overlap during a deploy/restart) gets ENOENT and skips.
+      // This is what the in-memory re-entrancy guard alone cannot protect against.
+      const claimPath = `${reqPath}.proc`;
+      try {
+        fs.renameSync(reqPath, claimPath);
+      } catch {
+        continue; // already claimed by someone else
+      }
       let req: { id?: string; name?: string | null; status?: string; recap?: string | null };
       try {
-        req = JSON.parse(fs.readFileSync(reqPath, 'utf8'));
+        req = JSON.parse(fs.readFileSync(claimPath, 'utf8'));
       } catch {
-        try { fs.unlinkSync(reqPath); } catch { /* ignore */ }
+        try { fs.unlinkSync(claimPath); } catch { /* ignore */ }
         continue;
       }
       const id = req.id;
-      if (!id) { try { fs.unlinkSync(reqPath); } catch { /* ignore */ } continue; }
+      if (!id) { try { fs.unlinkSync(claimPath); } catch { /* ignore */ } continue; }
       const transcript = path.join(os.homedir(), '.claude', 'projects', projectDir, `${id}.jsonl`);
       if (!fs.existsSync(transcript)) {
         // transcript not (yet) on disk — drop the request to avoid a stuck loop
-        try { fs.unlinkSync(reqPath); } catch { /* ignore */ }
+        try { fs.unlinkSync(claimPath); } catch { /* ignore */ }
         continue;
       }
-      // Claim the request up front: remove it before the slow createForumTopic
-      // call so a slow/overlapping cycle can never re-read it and create a
-      // duplicate topic. If creation fails below we drop it anyway (the /adopt
-      // fallback still works), so early removal does not lose recoverable work.
-      try { fs.unlinkSync(reqPath); } catch { /* ignore */ }
       try {
         const status = req.status === 'live' ? 'live' : req.status === 'ended' ? 'ended' : undefined;
         const emoji = status === 'live' ? '🟢' : status === 'ended' ? '💤' : '🔄';
@@ -114,12 +119,14 @@ export function startHandoffInbox(bot: Bot): void {
           ? '🟢 Sessão do Mac (ainda rodando lá) pronta aqui. Continuar por aqui enquanto roda no Mac pode divergir o histórico.'
           : '✅ Sessão do Mac pronta aqui. Manda uma mensagem pra continuar de onde parou.';
         await bot.api.sendMessage(groupId, ready, { message_thread_id: threadId });
+        fs.unlinkSync(claimPath);
         console.log(`[handoff-inbox] adopted ${id} into new topic ${threadId} ("${name}")`);
       } catch (err) {
         // Likely a permissions/API error (bot needs can_manage_topics). The
         // request was already claimed above, so it won't retry forever; the
         // /adopt fallback still works.
         console.error('[handoff-inbox] failed for', f, '-', err instanceof Error ? err.message : String(err));
+        try { fs.unlinkSync(claimPath); } catch { /* ignore */ }
       }
     }
   }
