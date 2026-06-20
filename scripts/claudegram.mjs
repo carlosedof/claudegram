@@ -394,17 +394,27 @@ async function cmdSync() {
   let created = 0;
   const wantRecap = !process.env.CLAUDEGRAM_NO_RECAP;
   for (const c of toPush) {
-    sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
-    let recap = null;
-    if (wantRecap) {
-      try { recap = generateRecap(readFileSync(c.path, 'utf8')); } catch { recap = null; }
+    // A transcript can vanish between the scan and here (a session ended/rotated
+    // during the slow recap phase). Skip it instead of crashing the whole sync.
+    if (!existsSync(c.path)) {
+      console.log(`  ⏭ ${c.name || c.id}: transcript sumiu, pulando`);
+      continue;
     }
-    const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, recap, ts: new Date().toISOString() });
-    execFileSync('ssh', [CFG.host,
-      `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/${c.id}.json'`],
-      { input: req, encoding: 'utf8' });
-    created++;
-    console.log(`  + ${c.status === 'live' ? '🟢' : '💤'} ${c.name || c.id}${recap ? ' 📋' : ''}`);
+    try {
+      sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
+      let recap = null;
+      if (wantRecap) {
+        try { recap = generateRecap(readFileSync(c.path, 'utf8')); } catch { recap = null; }
+      }
+      const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, recap, ts: new Date().toISOString() });
+      execFileSync('ssh', [CFG.host,
+        `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/${c.id}.json'`],
+        { input: req, encoding: 'utf8' });
+      created++;
+      console.log(`  + ${c.status === 'live' ? '🟢' : '💤'} ${c.name || c.id}${recap ? ' 📋' : ''}`);
+    } catch (err) {
+      console.log(`  ⏭ ${c.name || c.id}: push falhou (${String(err.message || err).split('\n')[0]}), pulando`);
+    }
   }
 
   // 5. Refresh transcripts of sessions that already have a topic: if the local
@@ -415,13 +425,18 @@ async function cmdSync() {
   let refreshed = 0;
   let behind = 0;
   for (const c of toRefresh) {
+    if (!existsSync(c.path)) continue; // transcript vanished — nothing to refresh
     const localLines = fileMeta(c.path)?.lines ?? 0;
     const vmLines = vmCounts[c.id] ?? 0;
     const action = refreshAction(localLines, vmLines);
     if (action === 'push') {
-      sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
-      refreshed++;
-      console.log(`  ↻ ${c.name || c.id} (local ${localLines} → VM, estava ${vmLines})`);
+      try {
+        sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
+        refreshed++;
+        console.log(`  ↻ ${c.name || c.id} (local ${localLines} → VM, estava ${vmLines})`);
+      } catch (err) {
+        console.log(`  ⏭ ${c.name || c.id}: refresh falhou (${String(err.message || err).split('\n')[0]}), pulando`);
+      }
     } else if (action === 'behind') {
       behind++;
       console.log(`  ⚠ ${c.name || c.id}: VM à frente (${vmLines} > ${localLines}) — não sobrescrevi (dê um pull antes)`);
