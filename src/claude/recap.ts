@@ -6,7 +6,18 @@ import { config } from '../config.js';
 // recap, and the Mac never spawns recap sessions that pollute ~/.claude/projects.
 // Uses Groq (key already in the container) via its OpenAI-compatible endpoint.
 const GROQ_CHAT_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-const RECAP_MODEL = process.env.CLAUDEGRAM_RECAP_GROQ_MODEL || 'llama-3.3-70b-versatile';
+// 8b-instant has a much larger free-tier daily token budget than 70b-versatile
+// (which caps at 100k tokens/day and gets exhausted by a bulk re-sync), so it's
+// the reliable default for per-topic generation. Override via env if desired.
+const RECAP_MODEL = process.env.CLAUDEGRAM_RECAP_GROQ_MODEL || 'llama-3.1-8b-instant';
+
+// Pull the first real emoji (incl. ZWJ sequences / variation selectors) out of a
+// string. Weaker models sometimes return a shortcode like ":bug:" instead of 🐛,
+// so we extract a genuine emoji char and fall back to 💬 when there isn't one.
+function pickEmoji(s: string): string {
+  const m = (s || '').match(/\p{Extended_Pictographic}(‍\p{Extended_Pictographic}|️)*/u);
+  return m ? m[0] : '💬';
+}
 
 interface CondenseOpts {
   tailTurns?: number;
@@ -77,7 +88,7 @@ export async function generateTopicMeta(transcriptPath: string): Promise<TopicMe
   const prompt = [
     'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code',
     '(linhas [U]=usuário, [A]=assistente). Responda APENAS com um objeto JSON com as chaves:',
-    '- "emoji": UM único emoji que represente bem o tema da sessão (pra identificar visualmente na lista de tópicos do Telegram).',
+    '- "emoji": UM único caractere emoji REAL (ex: 🐛 🚀 📊 🔧 🗄️ 🔐 📱), nunca um código tipo ":bug:". Escolha um que represente o tema, pra identificar o tópico de relance.',
     '- "title": um título curto e específico (no máximo ~6 palavras), no idioma predominante da conversa, fácil de reconhecer. Sem emoji no título.',
     '- "recap": 2 a 4 linhas curtas de contexto — do que se trata, o que foi feito/decidido, e o estado atual. Sem markdown, sem listas.',
     '',
@@ -116,7 +127,7 @@ export async function generateTopicMeta(transcriptPath: string): Promise<TopicMe
     }
     const title = (parsed.title || '').trim();
     if (!title) return null;
-    const emoji = (parsed.emoji || '').trim() || '💬';
+    const emoji = pickEmoji((parsed.emoji || '').trim());
     const recap = (parsed.recap || '').trim();
     return { emoji, title, recap: recap ? recap.slice(0, 600) : null };
   } catch (err) {
