@@ -168,38 +168,9 @@ export function isRecapTranscript(jsonlText) {
   return false;
 }
 
-// Generate a short recap of a session to post as the first message of its
-// Telegram topic, so the title alone isn't the only context. Summarizes the
-// condensed transcript with a cheap local `claude -p` call. `--no-session-persistence`
-// keeps the call from writing its own transcript into ~/.claude/projects (which
-// would otherwise be re-synced as junk topics). Returns null (and the bot falls
-// back to just the ready line) if there's nothing to summarize or the call fails.
-function generateRecap(jsonlText) {
-  const condensed = condenseTranscript(jsonlText);
-  if (!condensed) return null;
-  const model = process.env.CLAUDEGRAM_RECAP_MODEL || 'claude-haiku-4-5';
-  const prompt = [
-    RECAP_PROMPT_HEADER,
-    '(linhas [U]=usuário, [A]=assistente). Escreva um recap em português de 2 a 4 linhas',
-    'curtas para servir de contexto no topo de um tópico do Telegram: do que se trata,',
-    'o que foi feito/decidido, e o estado atual. Sem saudação, sem markdown, sem listas,',
-    'apenas o texto do recap.',
-    '',
-    '--- TRANSCRIÇÃO ---',
-    condensed,
-  ].join('\n');
-  try {
-    const out = execFileSync('claude', ['-p', '--no-session-persistence', '--model', model], {
-      input: prompt,
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    const recap = (out || '').trim();
-    return recap ? recap.slice(0, 600) : null;
-  } catch {
-    return null;
-  }
-}
+// NOTE: recap generation moved to the bot (src/claude/recap.ts, via Groq) so it
+// works for scheduled launchd runs too and never spawns a local `claude -p`
+// session. The CLI no longer generates recaps; it just pushes the transcript.
 
 function fileMeta(p) {
   if (!existsSync(p)) return null;
@@ -392,26 +363,23 @@ async function cmdSync() {
   const archivedSet = new Set(archivedIds);
   const toPush = selectToPush(candidates, existingIds, archivedIds);
   let created = 0;
-  const wantRecap = !process.env.CLAUDEGRAM_NO_RECAP;
   for (const c of toPush) {
-    // A transcript can vanish between the scan and here (a session ended/rotated
-    // during the slow recap phase). Skip it instead of crashing the whole sync.
+    // A transcript can vanish between the scan and here (a session ended/rotated).
+    // Skip it instead of crashing the whole sync.
     if (!existsSync(c.path)) {
       console.log(`  ⏭ ${c.name || c.id}: transcript sumiu, pulando`);
       continue;
     }
     try {
       sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
-      let recap = null;
-      if (wantRecap) {
-        try { recap = generateRecap(readFileSync(c.path, 'utf8')); } catch { recap = null; }
-      }
-      const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, recap, ts: new Date().toISOString() });
+      // Recap is generated bot-side (Groq) from the pushed transcript — no local
+      // `claude -p` (which broke under launchd via TCC and polluted the session list).
+      const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, ts: new Date().toISOString() });
       execFileSync('ssh', [CFG.host,
         `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/${c.id}.json'`],
         { input: req, encoding: 'utf8' });
       created++;
-      console.log(`  + ${c.status === 'live' ? '🟢' : '💤'} ${c.name || c.id}${recap ? ' 📋' : ''}`);
+      console.log(`  + ${c.status === 'live' ? '🟢' : '💤'} ${c.name || c.id}`);
     } catch (err) {
       console.log(`  ⏭ ${c.name || c.id}: push falhou (${String(err.message || err).split('\n')[0]}), pulando`);
     }

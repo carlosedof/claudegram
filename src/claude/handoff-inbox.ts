@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { sessionManager } from './session-manager.js';
 import { clearConversation } from '../providers/provider-router.js';
 import { buildSessionKey } from '../utils/session-key.js';
+import { generateRecap } from './recap.js';
 
 // Inbox lives in the bot's state volume; `claudegram push` drops <id>.json here
 // (via docker exec). We poll it and, for each request, create a fresh Telegram
@@ -110,8 +111,9 @@ export function startHandoffInbox(bot: Bot): void {
         sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
         sessionManager.setClaudeSessionId(sessionKey, id);
         // Recap first (so it's the opening message and gives context beyond the
-        // title), then the ready line.
-        const recap = (req.recap && req.recap.trim()) ? req.recap.trim() : null;
+        // title), then the ready line. Generated here on the bot from the pushed
+        // transcript — works for manual AND scheduled syncs, no macOS TCC issues.
+        const recap = await generateRecap(transcript);
         if (recap) {
           await bot.api.sendMessage(groupId, `📋 ${recap}`, { message_thread_id: threadId });
         }
