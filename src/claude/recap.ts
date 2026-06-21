@@ -54,13 +54,20 @@ export function condenseTranscript(jsonlText: string, opts: CondenseOpts = {}): 
   return out;
 }
 
+export interface TopicMeta {
+  emoji: string;       // one content emoji to make the topic identifiable at a glance
+  title: string;       // short, specific title in the conversation's language
+  recap: string | null; // 2–4 line context, posted as the opening message
+}
+
 /**
- * Generate a short PT recap of a session's transcript to post as the opening
- * message of its Telegram topic. Best-effort: returns null (and the caller falls
- * back to just the ready line) if Groq isn't configured, the transcript is
- * unreadable/empty, or the call fails.
+ * In one Groq call, derive a content emoji + a short descriptive title + a recap
+ * from a session's transcript. Used to name the Telegram topic and post its
+ * opening context. Best-effort: returns null (caller falls back to the aiTitle +
+ * status emoji and no recap) if Groq isn't configured, the transcript is
+ * unreadable/empty, the call fails, or the JSON can't be parsed.
  */
-export async function generateRecap(transcriptPath: string): Promise<string | null> {
+export async function generateTopicMeta(transcriptPath: string): Promise<TopicMeta | null> {
   if (!config.GROQ_API_KEY) return null;
   let raw: string;
   try { raw = fs.readFileSync(transcriptPath, 'utf8'); } catch { return null; }
@@ -69,10 +76,10 @@ export async function generateRecap(transcriptPath: string): Promise<string | nu
 
   const prompt = [
     'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code',
-    '(linhas [U]=usuário, [A]=assistente). Escreva um recap em português de 2 a 4 linhas',
-    'curtas para servir de contexto no topo de um tópico do Telegram: do que se trata,',
-    'o que foi feito/decidido, e o estado atual. Sem saudação, sem markdown, sem listas,',
-    'apenas o texto do recap.',
+    '(linhas [U]=usuário, [A]=assistente). Responda APENAS com um objeto JSON com as chaves:',
+    '- "emoji": UM único emoji que represente bem o tema da sessão (pra identificar visualmente na lista de tópicos do Telegram).',
+    '- "title": um título curto e específico (no máximo ~6 palavras), no idioma predominante da conversa, fácil de reconhecer. Sem emoji no título.',
+    '- "recap": 2 a 4 linhas curtas de contexto — do que se trata, o que foi feito/decidido, e o estado atual. Sem markdown, sem listas.',
     '',
     '--- TRANSCRIÇÃO ---',
     condensed,
@@ -87,8 +94,9 @@ export async function generateRecap(transcriptPath: string): Promise<string | nu
       },
       body: JSON.stringify({
         model: RECAP_MODEL,
+        response_format: { type: 'json_object' },
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 300,
+        max_tokens: 400,
         temperature: 0.3,
       }),
     });
@@ -97,8 +105,20 @@ export async function generateRecap(transcriptPath: string): Promise<string | nu
       return null;
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const recap = (data.choices?.[0]?.message?.content || '').trim();
-    return recap ? recap.slice(0, 600) : null;
+    const content = data.choices?.[0]?.message?.content || '';
+    let parsed: { emoji?: string; title?: string; recap?: string };
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      const m = content.match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      try { parsed = JSON.parse(m[0]); } catch { return null; }
+    }
+    const title = (parsed.title || '').trim();
+    if (!title) return null;
+    const emoji = (parsed.emoji || '').trim() || '💬';
+    const recap = (parsed.recap || '').trim();
+    return { emoji, title, recap: recap ? recap.slice(0, 600) : null };
   } catch (err) {
     console.error('[recap] failed:', err instanceof Error ? err.message : String(err));
     return null;

@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { sessionManager } from './session-manager.js';
 import { clearConversation } from '../providers/provider-router.js';
 import { buildSessionKey } from '../utils/session-key.js';
-import { generateRecap } from './recap.js';
+import { generateTopicMeta } from './recap.js';
 
 // Inbox lives in the bot's state volume; `claudegram push` drops <id>.json here
 // (via docker exec). We poll it and, for each request, create a fresh Telegram
@@ -99,23 +99,28 @@ export function startHandoffInbox(bot: Bot): void {
       }
       try {
         const status = req.status === 'live' ? 'live' : req.status === 'ended' ? 'ended' : undefined;
-        const emoji = status === 'live' ? '🟢' : status === 'ended' ? '💤' : '🔄';
-        const raw = (req.name && req.name.trim())
-          ? req.name.trim()
-          : deriveName(transcript).replace(/^🔄\s*/, '');
-        const name = `${emoji} ${raw}`.slice(0, 60);
+        // Ask Groq (one call) for a content emoji + descriptive title + recap.
+        // Falls back to the aiTitle/first-message + status emoji if it fails.
+        const meta = await generateTopicMeta(transcript);
+        let name: string;
+        if (meta) {
+          name = `${meta.emoji} ${meta.title}`.slice(0, 60);
+        } else {
+          const fbEmoji = status === 'live' ? '🟢' : status === 'ended' ? '💤' : '🔄';
+          const fbRaw = (req.name && req.name.trim())
+            ? req.name.trim()
+            : deriveName(transcript).replace(/^🔄\s*/, '');
+          name = `${fbEmoji} ${fbRaw}`.slice(0, 60);
+        }
         const topic = await bot.api.createForumTopic(groupId, name);
         const threadId = topic.message_thread_id;
         const sessionKey = buildSessionKey(groupId, threadId);
         clearConversation(sessionKey);
         sessionManager.getOrCreate(sessionKey, config.WORKSPACE_DIR);
         sessionManager.setClaudeSessionId(sessionKey, id);
-        // Recap first (so it's the opening message and gives context beyond the
-        // title), then the ready line. Generated here on the bot from the pushed
-        // transcript — works for manual AND scheduled syncs, no macOS TCC issues.
-        const recap = await generateRecap(transcript);
-        if (recap) {
-          await bot.api.sendMessage(groupId, `📋 ${recap}`, { message_thread_id: threadId });
+        // Recap as the opening message (context beyond the title), then ready line.
+        if (meta?.recap) {
+          await bot.api.sendMessage(groupId, `📋 ${meta.recap}`, { message_thread_id: threadId });
         }
         const ready = status === 'live'
           ? '🟢 Sessão do Mac (ainda rodando lá) pronta aqui. Continuar por aqui enquanto roda no Mac pode divergir o histórico.'
