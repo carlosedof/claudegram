@@ -135,6 +135,7 @@ const envSchema = z.object({
   // Voice transcription (Groq Whisper)
   GROQ_API_KEY: z.string().optional(),
   GROQ_TRANSCRIBE_PATH: z.string().default(''),
+  GEMINI_API_KEY: z.string().optional(),
   TRANSCRIBE_ENABLED: z.string().default('true').transform(toBool),
   VOICE_SHOW_TRANSCRIPT: z
     .string()

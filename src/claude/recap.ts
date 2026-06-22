@@ -4,12 +4,62 @@ import { config } from '../config.js';
 // Recap is generated here on the bot (Linux, no macOS TCC popups) rather than on
 // the Mac via `claude -p` — so both manual AND scheduled (launchd) syncs get a
 // recap, and the Mac never spawns recap sessions that pollute ~/.claude/projects.
-// Uses Groq (key already in the container) via its OpenAI-compatible endpoint.
-const GROQ_CHAT_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-// 8b-instant has a much larger free-tier daily token budget than 70b-versatile
-// (which caps at 100k tokens/day and gets exhausted by a bulk re-sync), so it's
-// the reliable default for per-topic generation. Override via env if desired.
-const RECAP_MODEL = process.env.CLAUDEGRAM_RECAP_GROQ_MODEL || 'llama-3.1-8b-instant';
+// LLM providers for topic meta, tried in order: Gemini 2.5-flash (smart, varied
+// emojis, generous free tier) first, Groq (llama-3.1-8b) as fallback. Both via
+// their OpenAI-compatible chat-completions endpoint + JSON mode. Models overridable
+// via env. A 429/error on one provider falls through to the next.
+interface LlmProvider { name: string; url: string; key: string; model: string; maxTokens: number; }
+function llmProviders(): LlmProvider[] {
+  const out: LlmProvider[] = [];
+  if (config.GEMINI_API_KEY) {
+    out.push({
+      name: 'gemini',
+      url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+      key: config.GEMINI_API_KEY,
+      model: process.env.CLAUDEGRAM_RECAP_GEMINI_MODEL || 'gemini-2.5-flash',
+      maxTokens: 1200, // 2.5-flash spends tokens "thinking" before emitting the JSON
+    });
+  }
+  if (config.GROQ_API_KEY) {
+    out.push({
+      name: 'groq',
+      url: 'https://api.groq.com/openai/v1/chat/completions',
+      key: config.GROQ_API_KEY,
+      model: process.env.CLAUDEGRAM_RECAP_GROQ_MODEL || 'llama-3.1-8b-instant',
+      maxTokens: 500,
+    });
+  }
+  return out;
+}
+
+// Try each provider in order; return the first non-empty JSON content, else null.
+async function chatJSON(prompt: string): Promise<string | null> {
+  for (const p of llmProviders()) {
+    try {
+      const res = await fetch(p.url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${p.key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: p.model,
+          response_format: { type: 'json_object' },
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: p.maxTokens,
+          temperature: 0.3,
+        }),
+      });
+      if (!res.ok) {
+        console.error(`[recap] ${p.name} error`, res.status, (await res.text()).slice(0, 160));
+        continue; // fall through to next provider
+      }
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const content = (data.choices?.[0]?.message?.content || '').trim();
+      if (content) return content;
+    } catch (err) {
+      console.error(`[recap] ${p.name} failed:`, err instanceof Error ? err.message : String(err));
+    }
+  }
+  return null;
+}
 
 // Pull the first real emoji (incl. ZWJ sequences / variation selectors) out of a
 // string. Weaker models sometimes return a shortcode like ":bug:" instead of 🐛,
@@ -72,14 +122,14 @@ export interface TopicMeta {
 }
 
 /**
- * In one Groq call, derive a content emoji + a short descriptive title + a recap
+ * In one LLM call, derive a content emoji + a short descriptive title + a recap
  * from a session's transcript. Used to name the Telegram topic and post its
  * opening context. Best-effort: returns null (caller falls back to the aiTitle +
- * status emoji and no recap) if Groq isn't configured, the transcript is
- * unreadable/empty, the call fails, or the JSON can't be parsed.
+ * status emoji and no recap) if no provider is configured, the transcript is
+ * unreadable/empty, every provider fails, or the JSON can't be parsed.
  */
 export async function generateTopicMeta(transcriptPath: string): Promise<TopicMeta | null> {
-  if (!config.GROQ_API_KEY) return null;
+  if (!config.GEMINI_API_KEY && !config.GROQ_API_KEY) return null;
   let raw: string;
   try { raw = fs.readFileSync(transcriptPath, 'utf8'); } catch { return null; }
   const condensed = condenseTranscript(raw);
@@ -88,7 +138,7 @@ export async function generateTopicMeta(transcriptPath: string): Promise<TopicMe
   const prompt = [
     'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code',
     '(linhas [U]=usuário, [A]=assistente). Responda APENAS com um objeto JSON com as chaves:',
-    '- "emoji": UM único caractere emoji REAL (ex: 🐛 🚀 📊 🔧 🗄️ 🔐 📱), nunca um código tipo ":bug:". Escolha um que represente o tema, pra identificar o tópico de relance.',
+    '- "emoji": UM único caractere emoji REAL (nunca um código tipo ":bug:"). Escolha um ESPECÍFICO para o tema da sessão (ex: 🐛 bug, 🚀 deploy, 🗄️ banco de dados, 🔐 auth, 📱 mobile, 💰 pagamento, 📧 email, 🔍 investigação). VARIE conforme o assunto — evite usar 📊 como padrão.',
     '- "title": um título curto e específico (no máximo ~6 palavras), no idioma predominante da conversa, fácil de reconhecer. Sem emoji no título.',
     '- "recap": 2 a 4 linhas curtas de contexto — do que se trata, o que foi feito/decidido, e o estado atual. Sem markdown, sem listas.',
     '',
@@ -96,42 +146,20 @@ export async function generateTopicMeta(transcriptPath: string): Promise<TopicMe
     condensed,
   ].join('\n');
 
+  const content = await chatJSON(prompt);
+  if (!content) return null;
+
+  let parsed: { emoji?: string; title?: string; recap?: string };
   try {
-    const res = await fetch(GROQ_CHAT_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: RECAP_MODEL,
-        response_format: { type: 'json_object' },
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 400,
-        temperature: 0.3,
-      }),
-    });
-    if (!res.ok) {
-      console.error('[recap] groq error', res.status, (await res.text()).slice(0, 200));
-      return null;
-    }
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const content = data.choices?.[0]?.message?.content || '';
-    let parsed: { emoji?: string; title?: string; recap?: string };
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const m = content.match(/\{[\s\S]*\}/);
-      if (!m) return null;
-      try { parsed = JSON.parse(m[0]); } catch { return null; }
-    }
-    const title = (parsed.title || '').trim();
-    if (!title) return null;
-    const emoji = pickEmoji((parsed.emoji || '').trim());
-    const recap = (parsed.recap || '').trim();
-    return { emoji, title, recap: recap ? recap.slice(0, 600) : null };
-  } catch (err) {
-    console.error('[recap] failed:', err instanceof Error ? err.message : String(err));
-    return null;
+    parsed = JSON.parse(content);
+  } catch {
+    const m = content.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    try { parsed = JSON.parse(m[0]); } catch { return null; }
   }
+  const title = (parsed.title || '').trim();
+  if (!title) return null;
+  const emoji = pickEmoji((parsed.emoji || '').trim());
+  const recap = (parsed.recap || '').trim();
+  return { emoji, title, recap: recap ? recap.slice(0, 600) : null };
 }
