@@ -47,30 +47,47 @@ async function respectGap(p: LlmProvider): Promise<void> {
 }
 
 // Try each provider in order; return the first non-empty JSON content, else null.
+// On a 429, honor the "retry in Xs" hint and retry the SAME provider a few times
+// (so a per-minute rate limit doesn't immediately drop us to the weaker fallback).
 async function chatJSON(prompt: string): Promise<string | null> {
   for (const p of llmProviders()) {
-    try {
-      await respectGap(p);
-      const res = await fetch(p.url, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${p.key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: p.model,
-          response_format: { type: 'json_object' },
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: p.maxTokens,
-          temperature: 0.3,
-        }),
-      });
-      if (!res.ok) {
-        console.error(`[recap] ${p.name} error`, res.status, (await res.text()).slice(0, 160));
-        continue; // fall through to next provider
+    const maxAttempts = p.name === 'gemini' ? 3 : 1;
+    let nextProvider = false;
+    for (let attempt = 1; attempt <= maxAttempts && !nextProvider; attempt++) {
+      try {
+        await respectGap(p);
+        const res = await fetch(p.url, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${p.key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: p.model,
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: p.maxTokens,
+            temperature: 0.3,
+          }),
+        });
+        if (!res.ok) {
+          const body = (await res.text()).slice(0, 200);
+          if (res.status === 429 && attempt < maxAttempts) {
+            const m = body.match(/retry in ([0-9.]+)s/i);
+            const waitMs = Math.min((m ? parseFloat(m[1]) : 5) + 0.5, 15) * 1000;
+            console.error(`[recap] ${p.name} 429 — waiting ${Math.round(waitMs / 1000)}s, retry ${attempt + 1}/${maxAttempts}`);
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue; // retry same provider
+          }
+          console.error(`[recap] ${p.name} error`, res.status, body.slice(0, 160));
+          nextProvider = true; // give up on this provider
+          continue;
+        }
+        const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+        const content = (data.choices?.[0]?.message?.content || '').trim();
+        if (content) return content;
+        nextProvider = true; // empty response — try next provider
+      } catch (err) {
+        console.error(`[recap] ${p.name} failed:`, err instanceof Error ? err.message : String(err));
+        nextProvider = true; // network/parse error — try next provider
       }
-      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      const content = (data.choices?.[0]?.message?.content || '').trim();
-      if (content) return content;
-    } catch (err) {
-      console.error(`[recap] ${p.name} failed:`, err instanceof Error ? err.message : String(err));
     }
   }
   return null;
