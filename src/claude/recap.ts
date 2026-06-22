@@ -8,7 +8,7 @@ import { config } from '../config.js';
 // emojis, generous free tier) first, Groq (llama-3.1-8b) as fallback. Both via
 // their OpenAI-compatible chat-completions endpoint + JSON mode. Models overridable
 // via env. A 429/error on one provider falls through to the next.
-interface LlmProvider { name: string; url: string; key: string; model: string; maxTokens: number; }
+interface LlmProvider { name: string; url: string; key: string; model: string; maxTokens: number; minGapMs: number; }
 function llmProviders(): LlmProvider[] {
   const out: LlmProvider[] = [];
   if (config.GEMINI_API_KEY) {
@@ -18,6 +18,9 @@ function llmProviders(): LlmProvider[] {
       key: config.GEMINI_API_KEY,
       model: process.env.CLAUDEGRAM_RECAP_GEMINI_MODEL || 'gemini-2.5-flash',
       maxTokens: 1200, // 2.5-flash spends tokens "thinking" before emitting the JSON
+      // Free tier is ~10 RPM; space calls so a bulk sync stays under it and every
+      // topic gets Gemini (instead of 429-ing through to Groq). Slower, but fine.
+      minGapMs: Number(process.env.CLAUDEGRAM_GEMINI_MIN_GAP_MS || 6500),
     });
   }
   if (config.GROQ_API_KEY) {
@@ -27,15 +30,27 @@ function llmProviders(): LlmProvider[] {
       key: config.GROQ_API_KEY,
       model: process.env.CLAUDEGRAM_RECAP_GROQ_MODEL || 'llama-3.1-8b-instant',
       maxTokens: 500,
+      minGapMs: Number(process.env.CLAUDEGRAM_GROQ_MIN_GAP_MS || 0),
     });
   }
   return out;
+}
+
+// Last call time per provider, to enforce minGapMs spacing (avoids free-tier 429s
+// during a bulk sync). The inbox is drained sequentially, so a simple await is enough.
+const lastCallTs: Record<string, number> = {};
+async function respectGap(p: LlmProvider): Promise<void> {
+  if (!p.minGapMs) return;
+  const wait = p.minGapMs - (Date.now() - (lastCallTs[p.name] || 0));
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCallTs[p.name] = Date.now();
 }
 
 // Try each provider in order; return the first non-empty JSON content, else null.
 async function chatJSON(prompt: string): Promise<string | null> {
   for (const p of llmProviders()) {
     try {
+      await respectGap(p);
       const res = await fetch(p.url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${p.key}`, 'Content-Type': 'application/json' },
