@@ -406,7 +406,9 @@ async function cmdSync() {
       sh('scp', [c.path, `${CFG.host}:${remoteProjDir()}/${c.id}.jsonl`]);
       // Recap is generated bot-side (Groq) from the pushed transcript — no local
       // `claude -p` (which broke under launchd via TCC and polluted the session list).
-      const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, ts: new Date().toISOString() });
+      // source:'sync' lets the bot refuse to recreate a topic the user retired
+      // (archived) — only an explicit `push` may resurrect one. See adoption-policy.ts.
+      const req = JSON.stringify({ id: c.id, name: c.name, status: c.status, source: 'sync', ts: new Date().toISOString() });
       execFileSync('ssh', [CFG.host,
         `docker exec -i claudegram sh -c 'mkdir -p /root/.claudegram/handoff-inbox && cat > /root/.claudegram/handoff-inbox/${c.id}.json'`],
         { input: req, encoding: 'utf8' });

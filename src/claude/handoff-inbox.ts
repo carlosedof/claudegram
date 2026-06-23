@@ -7,6 +7,8 @@ import { sessionManager } from './session-manager.js';
 import { clearConversation } from '../providers/provider-router.js';
 import { buildSessionKey } from '../utils/session-key.js';
 import { generateTopicMeta } from './recap.js';
+import { archivedSessions } from './archived-sessions.js';
+import { shouldAdopt } from './adoption-policy.js';
 
 // Inbox lives in the bot's state volume; `claudegram push` drops <id>.json here
 // (via docker exec). We poll it and, for each request, create a fresh Telegram
@@ -82,7 +84,7 @@ export function startHandoffInbox(bot: Bot): void {
       } catch {
         continue; // already claimed by someone else
       }
-      let req: { id?: string; name?: string | null; status?: string; recap?: string | null };
+      let req: { id?: string; name?: string | null; status?: string; recap?: string | null; source?: string };
       try {
         req = JSON.parse(fs.readFileSync(claimPath, 'utf8'));
       } catch {
@@ -91,6 +93,15 @@ export function startHandoffInbox(bot: Bot): void {
       }
       const id = req.id;
       if (!id) { try { fs.unlinkSync(claimPath); } catch { /* ignore */ } continue; }
+      // Never let `sync` resurrect a session whose topic the user retired. The
+      // CLI's archived-filter races with reconcile (a live session gets re-pushed
+      // before reconcile re-archives it), so we enforce the retire here — the bot
+      // owns the archived list. Explicit `push` (no source) still resurrects.
+      if (!shouldAdopt(req, archivedSessions.has(id))) {
+        try { fs.unlinkSync(claimPath); } catch { /* ignore */ }
+        console.log(`[handoff-inbox] skipped ${id} — retired session, sync won't recreate its topic`);
+        continue;
+      }
       const transcript = path.join(os.homedir(), '.claude', 'projects', projectDir, `${id}.jsonl`);
       if (!fs.existsSync(transcript)) {
         // transcript not (yet) on disk — drop the request to avoid a stuck loop
