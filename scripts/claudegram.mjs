@@ -168,6 +168,34 @@ export function isRecapTranscript(jsonlText) {
   return false;
 }
 
+// True if the session was explicitly closed with `exit` / `/exit` — i.e. the last
+// real thing the user did was the exit command. Such a session is almost certainly
+// finished, so sync skips it (no new topic, no refresh). Typing `exit` is normalized
+// by the CLI to a `<command-name>/exit</command-name>` user message followed by a
+// random goodbye `<local-command-stdout>` (the literal string "exit" never appears).
+// We walk from the end, skipping non-user lines, meta caveats, the trailing goodbye
+// stdout, and tool_result-only user messages; the first real user action decides:
+// `/exit` → ended; any typed prompt → still active (e.g. the session was resumed
+// after the exit, which appends more turns).
+export function endedWithExit(jsonlText) {
+  const lines = jsonlText.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].trim()) continue;
+    let d;
+    try { d = JSON.parse(lines[i]); } catch { continue; }
+    if (d.type !== 'user' || d.isMeta) continue;
+    const c = d.message && d.message.content;
+    const text = typeof c === 'string'
+      ? c
+      : Array.isArray(c) ? c.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ') : '';
+    if (/<local-command-stdout>|<local-command-caveat>/.test(text)) continue;
+    if (/<command-name>\s*\/?exit\s*<\/command-name>/i.test(text)) return true;
+    if (text.trim()) return false; // a real typed prompt (or other command) — still active
+    // empty (e.g. tool_result-only user message) — keep walking
+  }
+  return false;
+}
+
 // NOTE: recap generation moved to the bot (src/claude/recap.ts, via Groq) so it
 // works for scheduled launchd runs too and never spawns a local `claude -p`
 // session. The CLI no longer generates recaps; it just pushes the transcript.
@@ -344,6 +372,10 @@ async function cmdSync() {
       try { text = readFileSync(full, 'utf8'); } catch { continue; }
       // Skip recap-generation sessions so they never become topics.
       if (isRecapTranscript(text)) continue;
+      // Skip sessions you closed with `exit` — almost certainly finished, so no new
+      // topic and no refresh. A live (running) proc always wins, even if the tail
+      // shows a stale /exit, since the session is demonstrably still active.
+      if (!live && endedWithExit(text)) continue;
       const title = extractAiTitle(text);
       candidates.push({ id, path: full, name: title, status: live ? 'live' : 'ended' });
     }

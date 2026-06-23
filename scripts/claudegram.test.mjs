@@ -9,6 +9,7 @@ import {
   refreshAction,
   condenseTranscript,
   isRecapTranscript,
+  endedWithExit,
 } from './claudegram.mjs';
 
 test('encodeProjectDir replaces slashes with dashes', () => {
@@ -130,4 +131,53 @@ test('isRecapTranscript flags recap-generation sessions, not real ones', () => {
   // first user message wins (array-form content)
   const arr = JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'Você recebe a transcrição condensada de uma sessão de trabalho com o Claude Code' }] } });
   assert.equal(isRecapTranscript(arr), true);
+});
+
+test('endedWithExit: true when the last real user action is /exit', () => {
+  // Real tail shape: caveat (isMeta) → /exit command → goodbye stdout → snapshot.
+  const jsonl = [
+    JSON.stringify({ type: 'user', message: { content: 'investiga o bug' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'feito' }] } }),
+    JSON.stringify({ type: 'permission-mode', permissionMode: 'default' }),
+    JSON.stringify({ type: 'user', isMeta: true, message: { content: '<local-command-caveat>Caveat: ...</local-command-caveat>' } }),
+    JSON.stringify({ type: 'user', message: { content: '<command-name>/exit</command-name>\n<command-message>exit</command-message>\n<command-args></command-args>' } }),
+    JSON.stringify({ type: 'user', message: { content: '<local-command-stdout>Goodbye!</local-command-stdout>' } }),
+    JSON.stringify({ type: 'file-history-snapshot', messageId: 'x' }),
+  ].join('\n');
+  assert.equal(endedWithExit(jsonl), true);
+});
+
+test('endedWithExit: false when a real prompt is the last action', () => {
+  const jsonl = [
+    JSON.stringify({ type: 'user', message: { content: 'investiga o bug' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'feito' }] } }),
+    JSON.stringify({ type: 'user', message: { content: 'abre o PR' } }),
+  ].join('\n');
+  assert.equal(endedWithExit(jsonl), false);
+});
+
+test('endedWithExit: false when the session was resumed after an /exit', () => {
+  const jsonl = [
+    JSON.stringify({ type: 'user', message: { content: '<command-name>/exit</command-name>\n<command-message>exit</command-message>' } }),
+    JSON.stringify({ type: 'user', message: { content: '<local-command-stdout>Goodbye!</local-command-stdout>' } }),
+    JSON.stringify({ type: 'user', message: { content: 'na verdade continua aí' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] } }),
+  ].join('\n');
+  assert.equal(endedWithExit(jsonl), false);
+});
+
+test('endedWithExit: tool_result-only user messages after /exit are skipped, not counted', () => {
+  const jsonl = [
+    JSON.stringify({ type: 'user', message: { content: '<command-name>/exit</command-name>' } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'exit 0' }] } }),
+  ].join('\n');
+  assert.equal(endedWithExit(jsonl), true);
+});
+
+test('endedWithExit: false on a session with no exit at all', () => {
+  const jsonl = [
+    JSON.stringify({ type: 'user', message: { content: 'oi' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'olá' }] } }),
+  ].join('\n');
+  assert.equal(endedWithExit(jsonl), false);
 });
