@@ -25,6 +25,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_linux_amd64.tar.gz \
        | tar xz --strip-components=2 -C /usr/local/bin gh_2.93.0_linux_amd64/bin/gh
 
+# Docker CLI (client only, no daemon) to inspect/manage the HOST's containers via
+# the mounted /var/run/docker.sock (see docker-compose.override.yml). The engine
+# runs on the host; this image ships just the CLI + compose plugin.
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+       > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
 # Legacy MongoDB 4.4 shell for DocumentDB queries via SSH tunnel.
 # DocDB advertises wire version 7 (MongoDB 4.0) — the modern mongosh refuses
 # it, so the legacy `mongo` shell is required. The ubuntu2004 build needs
