@@ -24,6 +24,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getWorkspaceRoot, isPathWithinRoot } from '../../utils/workspace-guard.js';
 import { getSessionKeyFromCtx } from '../../utils/session-key.js';
+import { showWorkspacePicker } from './topic-created.handler.js';
 
 async function replyFeatureDisabled(ctx: Context, feature: string): Promise<void> {
   await ctx.reply(`⚠️ ${feature} feature is disabled in configuration.`, { parse_mode: undefined });
@@ -257,6 +258,21 @@ export async function handleMessage(ctx: Context): Promise<void> {
   // Skip if this is a Claude command (handled by command handler)
   if (isClaudeCommand(text)) {
     return;
+  }
+
+  // Gate: a brand-new forum topic must pick a workspace BEFORE a session is
+  // created. Don't default to /workspace — the picker shown on topic creation
+  // can be raced by a fast first message, which would otherwise spin up a
+  // /workspace session. Hold the message and (re)show the picker; the session is
+  // created only when the user taps a folder (handleWorkspaceCallback). If there
+  // are no folders to offer, fall through to the default behavior.
+  if (keyInfo.threadId !== undefined && !sessionManager.getSession(sessionKey)) {
+    const shown = await showWorkspacePicker(
+      ctx,
+      keyInfo.threadId,
+      '📂 Escolha o workspace primeiro — depois reenvie sua mensagem:',
+    );
+    if (shown) return;
   }
 
   // Check for active session
