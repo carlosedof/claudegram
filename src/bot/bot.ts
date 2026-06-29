@@ -58,6 +58,7 @@ import {
 import { handleMessage } from './handlers/message.handler.js';
 import { handleVoice } from './handlers/voice.handler.js';
 import { handleTopicClosed } from './handlers/topic-closed.handler.js';
+import { handleTopicCreated, handleWorkspaceCallback } from './handlers/topic-created.handler.js';
 import { handlePhoto, handleImageDocument } from './handlers/photo.handler.js';
 
 // Resolve sequentialize constraint: same-chat updates are ordered,
@@ -238,6 +239,8 @@ export async function createBot(): Promise<Bot> {
       await handleClearCallback(ctx);
     } else if (data.startsWith('project:')) {
       await handleProjectCallback(ctx);
+    } else if (data.startsWith('ws:')) {
+      await handleWorkspaceCallback(ctx);
     } else if (data.startsWith('medium:')) {
       await handleMediumCallback(ctx);
     } else if (data.startsWith('extract:')) {
@@ -254,6 +257,9 @@ export async function createBot(): Promise<Bot> {
   // Handle voice messages
   // Retire + delete a session's topic when the user closes it.
   bot.on('message:forum_topic_closed', handleTopicClosed);
+
+  // Offer a workspace picker (maxpan/pessoal/...) when a user creates a topic.
+  bot.on('message:forum_topic_created', handleTopicCreated);
 
   bot.on('message:voice', handleVoice);
 
