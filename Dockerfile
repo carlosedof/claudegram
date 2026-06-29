@@ -37,6 +37,10 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
+# Vercel CLI — bot manages/deploys Vercel projects. Auth via the VERCEL_TOKEN
+# env var (set in .env), NEVER --token on argv (leaks in shell history / ps).
+RUN npm install -g vercel@latest
+
 # Legacy MongoDB 4.4 shell for DocumentDB queries via SSH tunnel.
 # DocDB advertises wire version 7 (MongoDB 4.0) — the modern mongosh refuses
 # it, so the legacy `mongo` shell is required. The ubuntu2004 build needs
